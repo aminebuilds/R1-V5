@@ -5119,6 +5119,7 @@ function openAiRealtimeProxy() {
             'Do not require a wake phrase. Treat direct commands like "zoom into London" or "open datacenters" as GEV control requests.',
             'Only control the app by calling the provided tools. Never invent tool names or arguments.',
             'Call tools only for clear GEV control, navigation, visual-style, layer, or app-state requests. For ordinary conversation, answer normally without tools.',
+            'You act as a capable assistant, not a command parser: you have direct control over every world data layer (aircraft, ships, fires, quakes, satellites, traffic, CCTV, radio), camera and navigation, visual styles and panels, natural-language analysis over loaded data, map annotation, scene playback, and the Banner OS portfolio tools (importing sites, searching a business by name, and per-site weather/traffic briefs). Translate the user\'s plain intent into the right tool call(s) even when their phrasing is vague, informal, or names no feature by its tool name — the user should never need to know a command to get value from you.',
             'For requests to open, show, reveal, or focus a menu/panel, call set_panel_open or show_data_layers_menu. "Open Context" means only set_panel_open{panelId:"global-context-panel",open:true}; it does not activate a Context sub-mode. "Open Contacts" means set_context_mode{mode:"contacts"}; that action expands the parent Context panel before activating Contacts.',
             'For requests like "show me the datacenter layers", open the data layers menu and focus the matching layer row; do not enable the layer unless the user asks to turn it on.',
             'For questions like "what am I looking at?", "what is in view?", "what is this?", "that selected thing", nearby datacenter, dam, cable, ship, or current view contents, call get_entity_context first, then answer from the returned scene/entity context.',
@@ -5141,6 +5142,7 @@ function openAiRealtimeProxy() {
             'When a request requires a tool call, do not speak in the same response as the tool call. Call the tool first.',
             'When a single user request contains MULTIPLE changes (e.g. "switch to operator layout, use balanced detection at density 50, and switch to Bing aerial"), call ALL the corresponding tools — multiple tool calls in sequence — before speaking. Never confirm a partial subset. If a later tool fails, say which parts succeeded and which failed.',
             'After receiving tool output, speak exactly one short confirmation. Do not repeat the confirmation.',
+            'You may follow that one confirmation with ONE brief, directly relevant suggestion for a natural next step, drawn only from capabilities that actually apply to what just happened (e.g. after adding sites via search_business_sites, "Want the brief on one of them?"; after enabling a layer, a natural follow-on question it now answers). Offer it once, briefly, then wait for the user — never chain a further tool call on your own initiative, and never suggest something unrelated to the action just completed.',
             'For "show/open/turn on" layer requests, enable the matching layer. For "hide/close/turn off", disable it.',
             // INSTRUCTION-ONLY mapping for the two globe-scale named views.
             //
@@ -5157,6 +5159,7 @@ function openAiRealtimeProxy() {
             'NAMED VIEWS are shorthand for tool calls you already have — there is no "mode" tool for them. Treat ONLY these as the shorthand: "infrastructure mode" / "the infrastructure view" / "show me global infrastructure" means three set_layer_visibility calls (local-datacenters, local-dams, telegeography-submarine-cables) plus zoom_to_globe; "environmental mode" / "earth watch" / "active events", said as the name of a view, means set_layer_visibility for local-firms and earthquakes plus zoom_to_globe. Anything vaguer is NOT this shorthand — an open-ended question about the world or the news is an ordinary question: answer it, or use analyst_query over the layers already on. Never switch a whole view on to answer a question nobody asked to see. When you do run one, make every call before speaking, then give one confirmation naming the resulting state; if the fires layer comes back unavailable because no FIRMS key is configured, say so plainly — the earthquakes still loaded. "Live contacts" and "space missions" are NOT this pattern: they stay set_context_mode{mode:"contacts"} and set_context_mode{mode:"space-missions"}.',
             'For visual filter requests, call set_visual_style with one of the allowed style IDs.',
             'Disambiguation table — basemap vs layer vs style: basemap switching requires an explicit stack name — "Bing aerial" means set_map_stack bing-aerial, "aerial with labels" means bing-labels, "OSM"/"road map" means osm, "Google 3D"/"photorealistic" means photoreal. Any mention of "satellite" or "satellites" ALWAYS means the satellites DATA LAYER via set_layer_visibility, never a basemap. "surveillance"/"night vision"/"thermal" are visual STYLES via set_visual_style.',
+            '"I\'m/we\'re <business>", "add my <business> locations", or "find <business> near here" uses search_business_sites — it searches for that business name near the current camera view and adds every match to the Banner OS site portfolio (the SITES panel). This only finds nearby matches, not a nationwide list, so say so plainly if the user asks for every location of a chain across the whole country. Confirm with the count returned, e.g. "Found four Torchy\'s Tacos nearby, added to your portfolio" or "No matches found near here" — never claim locations were added without ok=true and a positive count.',
             'HUD requests ("hud on/off", "switch to operator/minimal/tactical layout") use set_hud. Detection requests ("detection on", "dense mode", "balanced mode", "sparse mode", "set density to 25", "use weighted allocation") use set_detection. Density snaps to 0/25/50/75/100 and derives Sparse/Balanced/Dense; panoptic is a legacy alias for Dense.',
             'Bloom/sharpen requests use set_post_processing. Scene requests ("play orbital watch", "stop the scene", "what scenes are there") use control_scene. CCTV camera requests ("next camera", "nearest camera", "select the Congress camera", "show coverage") use control_cctv — the CCTV layer must be enabled first.',
             'Radio playback requests use control_radio. "Turn on/start the radio" means action=play; action=enable only reveals Radio markers and must be reserved for explicit "show/enable the Radio layer/markers" requests. After a prepared playback result, briefly confirm any other completed actions and say "Turning on the radio"—never claim it is already playing. The client keeps Radio muted until playback is verified, then closes voice before restoring Radio volume. Examples: "play news near Austin" → select category=news locationId=austin; "play US news" → select category=news country=US; "Radio volume 30" → volume; pause/resume/stop/next/previous use the matching action. Radio selection never moves the camera.',
@@ -6151,6 +6154,36 @@ const GEV_REALTIME_TOOLS = [
         longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Optional observer longitude. Omit to use the current camera position.' },
         minElevationDeg: { type: 'number', minimum: 5, maximum: 60, description: 'Minimum peak elevation (deg) to count as a pass. Default 10.' },
       },
+    },
+  },
+  {
+    type: 'function',
+    name: 'search_business_sites',
+    description: "Search for a business/brand by name near the current camera view (or an explicit location) and add every matching location to the operator's Banner OS site portfolio (the SITES panel). Use this when the user says things like 'I'm/we're <business name>', 'add my <business> locations', or 'find <business> near here'. This searches NEARBY matches only (Google Places, not a nationwide chain locator) — it will not find every location of a business across the whole country in one call, only what's near the current or given view.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        businessName: { type: 'string', description: "The business/brand name to search for, e.g. \"Torchy's Tacos\"." },
+        latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Optional search-center latitude. Omit to use the current camera position.' },
+        longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Optional search-center longitude. Omit to use the current camera position.' },
+      },
+      required: ['businessName'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'activate_network',
+    description: "The primary Banner OS entry point — use this instead of search_business_sites whenever the user wants analysis, not just pins on the map. Say things like 'activate <business>', 'run this for <business>', 'pull up <business>'s network', or 'what should I look at for <business>' trigger it. It searches for the business/brand near the current camera view (same NEARBY-only Google Places search as search_business_sites — not an exhaustive nationwide chain locator), adds every match to the operator's portfolio, computes a ranked dollar-gap queue across the WHOLE portfolio (every site added so far, not just this search), renders that queue in the SITES panel, and flies the camera to the single biggest modeled opportunity. The gap numbers in the result are a PLACEHOLDER model — deterministic but synthetic, not derived from real traffic, POS, or demographic data yet. Always describe them to the user as modeled/illustrative, never as measured or real; if asked how confident the numbers are, say plainly that this is a placeholder pending real data.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        businessName: { type: 'string', description: "The business/brand name to activate, e.g. \"Parker's\" or \"Casey's General Store\"." },
+        latitude: { type: 'number', minimum: -90, maximum: 90, description: 'Optional search-center latitude. Omit to use the current camera position.' },
+        longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Optional search-center longitude. Omit to use the current camera position.' },
+      },
+      required: ['businessName'],
     },
   },
 ];

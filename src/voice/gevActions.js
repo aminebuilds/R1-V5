@@ -20,6 +20,7 @@ import { isPickedWorldPosition } from '../data/scenePick.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
+import { activateNetwork, searchAndAddBusiness } from '../portfolio/sitesPanel.js';
 
 const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
 const PANEL_ALIASES = new Map([
@@ -916,6 +917,20 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
 
     if (name === 'clear_annotations') {
       return clearAnnotations(annotations);
+    }
+
+    if (name === 'search_business_sites') {
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      const result = await searchAndAddBusiness(args.businessName || '', { biasLat, biasLon });
+      return { ok: !result.error, action: 'search_business_sites', ...result };
+    }
+
+    if (name === 'activate_network') {
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      const result = await activateNetwork(args.businessName || '', { biasLat, biasLon });
+      return { ok: !result.error, action: 'activate_network', ...result };
     }
 
     throw new Error(`Unknown GEV tool: ${name}`);

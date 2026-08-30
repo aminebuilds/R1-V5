@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>God's Eye View</title>
+  <title>R.1 — Commercial Intelligence</title>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
 </head>
@@ -25,8 +25,28 @@
   <!-- Title -->
   <div id="title-bar">
     <div class="title-glow"></div>
-    <h1><span class="title-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /></span> <span>GOD'S EYE <span class="title-accent">VIEW</span></span></h1>
-    <p class="subtitle">NO PLACE LEFT BEHIND</p>
+    <h1><span class="title-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /></span> <span>R.<span class="title-accent">1</span></span></h1>
+    <div class="title-meta-row">
+      <p class="subtitle" id="masthead-subtitle">COMMERCIAL INTELLIGENCE</p>
+      <div id="industry-lens-container" class="industry-lens-container">
+        <label for="industry-lens-select" class="industry-lens-label">LENS:</label>
+        <select id="industry-lens-select" class="industry-lens-select" aria-label="Select commercial industry lens">
+          <option value="all">ALL INDUSTRIES · CROSS-SECTOR</option>
+          <option value="fuel-convenience" selected>Fuel &amp; Convenience</option>
+          <option value="automotive-ev">Automotive &amp; EV Mobility</option>
+          <option value="airlines-aviation">Airlines &amp; Aviation</option>
+          <option value="maritime-shipping">Maritime &amp; Shipping</option>
+          <option value="datacenters-cloud">Datacenters &amp; Cloud</option>
+          <option value="energy-utilities">Energy &amp; Utilities</option>
+          <option value="apparel-fashion">Apparel &amp; Fashion</option>
+          <option value="agriculture-commodities">Agriculture &amp; Commodities</option>
+          <option value="banking-financial">Banking &amp; Financial Services</option>
+          <option value="clinical-trials-healthcare">Clinical Trials &amp; Healthcare</option>
+          <option value="construction-heavy">Construction &amp; Heavy</option>
+          <option value="space-aerospace">Space &amp; Aerospace Defense</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <!-- Style indicator -->
@@ -680,6 +700,66 @@
     </div>
   </div>
 
+  <!-- Portfolio Sites Panel (Banner OS Phase 0) -->
+  <div id="sites-panel" class="panel-collapsible collapsed" data-panel-id="sites-panel">
+    <div class="panel-glow"></div>
+    <div class="sites-panel-inner">
+      <div class="panel-header">
+        <span class="panel-title">SITES</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="sites-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="scene-controls">
+        <input type="text" id="sites-business-search-input" class="sites-text-input" placeholder="Brand, business, or chain..." aria-label="Brand or chain name to map" />
+        <button id="sites-business-search-btn" class="scene-btn">SEARCH</button>
+      </div>
+      <div class="scene-controls">
+        <button id="sites-heatmap-toggle-btn" class="scene-btn" type="button" aria-label="Toggle Congestion Heatmap">HEATMAP: ON</button>
+        <button id="sites-import-btn" class="scene-btn">IMPORT CSV</button>
+        <input type="file" id="sites-import-file" accept=".csv,text/csv" hidden />
+      </div>
+      <div id="sites-import-status">Search any business chain or import a CSV portfolio.</div>
+      <div id="sites-portfolio-summary"></div>
+
+      <div id="sites-gap-queue" class="sites-gap-queue" hidden>
+        <div class="sites-gap-queue-header">
+          <span class="sites-brief-label">NETWORK OPPORTUNITY QUEUE</span>
+          <span id="sites-gap-queue-summary"></span>
+        </div>
+        <div class="sites-filter-chips" role="toolbar" aria-label="Filter network sites">
+          <button type="button" class="sites-filter-chip active" data-site-filter="all">All Sites</button>
+          <button type="button" class="sites-filter-chip" data-site-filter="bottlenecks">Bottlenecks</button>
+          <button type="button" class="sites-filter-chip" data-site-filter="weather">Weather Impact</button>
+          <button type="button" class="sites-filter-chip" data-site-filter="opportunity">High Gap</button>
+        </div>
+        <ul id="sites-gap-queue-list" class="sites-gap-queue-list"></ul>
+        <div class="sites-gap-queue-disclaimer">Real-time traffic friction &amp; weather sensitivity model.</div>
+      </div>
+
+      <div id="site-brief-empty">Select a site on the globe to view its brief.</div>
+      <div id="site-brief-content" hidden>
+        <div class="site-brief-wireframe-header" aria-hidden="true">
+          <span class="material-symbols-outlined" style="font-size: 28px; color: var(--text-secondary); opacity: 0.85;">domain</span>
+        </div>
+        <div class="site-brief-status-tag"><span class="status-dot"></span> ACTIVE ASSET</div>
+        <div id="site-brief-name" class="sites-brief-title"></div>
+        <div id="site-brief-address"></div>
+        <div id="site-brief-format"></div>
+        <div id="site-brief-ref"></div>
+        <div class="sites-brief-section">
+          <span class="sites-brief-label">WEATHER CONDITIONS</span>
+          <div id="site-brief-weather-status" role="status"></div>
+          <div id="site-brief-weather"></div>
+        </div>
+        <div class="sites-brief-section">
+          <span class="sites-brief-label">ROAD ACCESS &amp; TRAFFIC</span>
+          <div id="site-brief-traffic-status" role="status"></div>
+          <div id="site-brief-traffic"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   </div>
 
   <!-- Global Context is deliberately independent from the left layer accordion. -->
@@ -829,57 +909,64 @@
 
   <div id="scene-runtime"></div>
 
-  <!-- Explicit mission choice on a fresh session. Live feeds are not auto-enabled
-       until the visitor asks; shared links skip this surface entirely. It returns
-       every session until "Don't show this again" is ticked — see
-       src/firstRunExperience.js for the full show policy. -->
+  <!-- Explicit vertical onboarding on a fresh session. -->
   <aside id="first-run-launcher" role="dialog" aria-labelledby="first-run-title" aria-describedby="first-run-description" hidden>
-    <div class="first-run-scanline" aria-hidden="true"></div>
     <header class="first-run-header">
-      <span class="first-run-kicker">MISSION CONTROL · FIRST LAUNCH</span>
+      <span class="first-run-kicker">R.1 · Commercial Intelligence</span>
     </header>
-    <h2 id="first-run-title">Choose your first view</h2>
-    <!-- The card's one persuasive line, final and VERBATIM (2026-08-23)
-         — including the unspaced em dash. The arc it has to carry: this looks
-         like something you should not have access to → the sources are all
-         public → the data is real. Tile subcopy stays purely functional. -->
-    <p id="first-run-description">It feels like a forbidden cockpit—then you realize the sources are public and the data is real.</p>
+    <h2 id="first-run-title">Explore commercial networks</h2>
+    <p id="first-run-description">Search companies, infrastructure footprints, or supply chains across global markets.</p>
+    
+    <div class="first-run-search-row">
+      <form id="first-run-intent-form" class="first-run-intent-form" action="#">
+        <input type="text" id="first-run-intent-input" class="first-run-intent-input" placeholder="Search companies, infrastructure, or locations..." aria-label="Search companies, infrastructure, or locations" autocomplete="off" />
+        <button type="submit" id="first-run-intent-submit" class="first-run-intent-submit" aria-label="Search">Search</button>
+      </form>
+    </div>
+
+    <div class="first-run-intent-pills" role="toolbar" aria-label="Suggested searches">
+      <button type="button" class="first-run-pill" data-intent-sample="Casey's stores in Iowa along I-80">Fuel &amp; Retail</button>
+      <button type="button" class="first-run-pill" data-intent-sample="Tesla Superchargers along I-5 corridor">EV Mobility</button>
+      <button type="button" class="first-run-pill" data-intent-sample="Hyperscale datacenters in Northern Virginia">Cloud Infrastructure</button>
+      <button type="button" class="first-run-pill" data-intent-sample="Maersk container vessels entering Rotterdam port">Maritime Logistics</button>
+      <button type="button" class="first-run-pill" data-intent-sample="Commercial flights inbound to Atlanta airport">Aviation</button>
+    </div>
+
     <div class="first-run-choices">
-      <button type="button" data-first-run-choice="contacts">
+      <button type="button" data-first-run-choice="activate-network">
+        <span class="material-symbols-outlined" aria-hidden="true">storefront</span>
+        <span><strong>Retail &amp; Fuel Networks</strong><small>Explore physical retail footprints, forecourts, and local access</small></span>
+        <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
+      </button>
+      <button type="button" data-first-run-choice="gap-discovery">
+        <span class="material-symbols-outlined" aria-hidden="true">insights</span>
+        <span><strong>Market Opportunity</strong><small>Analyze growth potential and unmet local demand</small></span>
+        <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
+      </button>
+      <button type="button" data-first-run-choice="storm-watch">
         <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-        <span><strong>LIVE CONTACTS</strong><small>Aircraft, vessels and nearby intelligence</small></span>
+        <span><strong>Operations &amp; Weather</strong><small>Monitor road traffic flow, congestion, and environmental risk</small></span>
         <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
       </button>
-      <button type="button" data-first-run-choice="space-missions">
-        <span class="material-symbols-outlined" aria-hidden="true">rocket_launch</span>
-        <span><strong>SPACE MISSIONS</strong><small>Launches, spacecraft and orbital context</small></span>
-        <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
-      </button>
-      <button type="button" data-first-run-choice="environmental">
-        <span class="material-symbols-outlined" aria-hidden="true">local_fire_department</span>
-        <!-- Title text is painted from ENVIRONMENTAL_LABEL_CHOICE at init. -->
-        <!-- Subcopy names BOTH feeds this tile turns on, because the launcher
-             optimizes for the fully configured experience (product decision,
-             2026-08-23) — see the mission table in src/firstRunExperience.js. -->
-        <span><strong data-first-run-environmental-title>ENVIRONMENTAL</strong><small>Live earthquakes and active fires, from USGS and NASA</small></span>
+      <button type="button" data-first-run-choice="import-roster">
+        <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+        <span><strong>Import Portfolio</strong><small>Ingest custom site locations and property rosters from CSV</small></span>
         <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
       </button>
       <button type="button" class="first-run-explore" data-first-run-choice="explore">
         <span class="material-symbols-outlined" aria-hidden="true">public</span>
-        <span><strong>EXPLORE MANUALLY</strong><small>Begin with a clean globe</small></span>
+        <span><strong>Open Globe</strong><small>Start with an unobstructed global view</small></span>
         <span class="material-symbols-outlined first-run-arrow" aria-hidden="true">arrow_forward</span>
       </button>
     </div>
     <div class="first-run-footer">
       <label class="first-run-suppress">
         <input type="checkbox" data-first-run-suppress />
-        <span>Don't show this again</span>
+        <span>Don't show on launch</span>
       </label>
-      <span>ESC to dismiss</span>
+      <span>Esc to dismiss</span>
     </div>
-    <!-- Kept out of the footer row: it swaps to mission progress and errors, and
-         a live region that also holds layout makes the row jump as it speaks. -->
-    <p class="first-run-note" data-first-run-status role="status" aria-live="polite">Tip: the GEV MIC button in the dock lets you talk to the map.</p>
+    <p class="first-run-note" data-first-run-status role="status" aria-live="polite">Select an industry or search to begin.</p>
   </aside>
 
   <!-- Intelligence HUD Overlay -->
@@ -889,8 +976,8 @@
   <div id="loading-screen">
     <div class="loader-content">
       <span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /></span>
-      <h2>GOD'S EYE <span class="title-accent">VIEW</span></h2>
-      <p class="loader-status">Initializing photorealistic world...</p>
+      <h2>R.<span class="title-accent">1</span></h2>
+      <p class="loader-status">Initializing commercial intelligence platform...</p>
     </div>
   </div>
 

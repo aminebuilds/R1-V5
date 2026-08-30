@@ -87,6 +87,24 @@ export function environmentalLabel(choice = ENVIRONMENTAL_LABEL_CHOICE) {
 
 /** @type {Readonly<Record<string, object>>} */
 export const FIRST_RUN_MISSIONS = Object.freeze({
+  'activate-network': Object.freeze({
+    kind: 'sites-activate',
+    brand: "Casey's",
+    busyText: 'Activating retail & fuel network…',
+  }),
+  'gap-discovery': Object.freeze({
+    kind: 'sites-gap',
+    busyText: 'Ranking store opportunities…',
+  }),
+  'storm-watch': Object.freeze({
+    kind: 'globe',
+    layerIds: Object.freeze(['traffic', 'earthquakes']),
+    busyText: 'Connecting live traffic & weather…',
+  }),
+  'import-roster': Object.freeze({
+    kind: 'sites-import',
+    busyText: 'Opening store CSV import…',
+  }),
   contacts: Object.freeze({
     kind: 'context',
     contextMode: 'contacts',
@@ -251,10 +269,35 @@ export function rememberFirstRunSessionDismissed(sessionStorageRef) {
  * @param {() => Promise<any>} deps.flyToGlobe
  * @returns {Promise<{ok: boolean, choice: string, result?: object, failedLayerIds?: string[]}>}
  */
-export async function runFirstRunChoice(choice, { setContextMode, setLayerEnabled, flyToGlobe }) {
+export async function runFirstRunChoice(choice, { setContextMode, setLayerEnabled, flyToGlobe, activateNetwork, styleManager }) {
   const mission = FIRST_RUN_MISSIONS[choice];
   if (!mission) return { ok: false, choice };
   if (mission.kind === 'none') return { ok: true, choice };
+  if (mission.kind === 'sites-activate') {
+    if (typeof activateNetwork === 'function') {
+      await activateNetwork(mission.brand || "Casey's");
+    } else {
+      try {
+        const { activateNetwork: runActivate } = await import('./portfolio/sitesPanel.js');
+        await runActivate(mission.brand || "Casey's");
+      } catch (err) {
+        console.warn('Network activation failed:', err);
+      }
+    }
+    return { ok: true, choice };
+  }
+  if (mission.kind === 'sites-gap') {
+    if (setLayerEnabled) await setLayerEnabled('sites');
+    if (styleManager) styleManager.setPanelCollapsed?.('sites-panel', false, { explicit: true });
+    return { ok: true, choice };
+  }
+  if (mission.kind === 'sites-import') {
+    if (styleManager) {
+      styleManager.setPanelCollapsed?.('sites-panel', false, { explicit: true });
+      document.getElementById('sites-import-file')?.click();
+    }
+    return { ok: true, choice };
+  }
   if (mission.kind === 'context') {
     const result = await setContextMode(mission.contextMode);
     return { ok: Boolean(result?.ok), choice, result };
@@ -455,6 +498,8 @@ export function initFirstRunExperience({
         // these layers, so it persists exactly as clicking those rows would.
         setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
         flyToGlobe: () => styleManager.resetToGlobeView(),
+        styleManager,
+        dataManager,
       });
     } catch (error) {
       // A thrown mission is a real defect worth seeing in a bug report; the
@@ -476,6 +521,60 @@ export function initFirstRunExperience({
     }
     setBusy(false);
   };
+
+  const intentForm = root.querySelector('#first-run-intent-form');
+  const intentInput = root.querySelector('#first-run-intent-input');
+  const intentPills = root.querySelectorAll('.first-run-pill');
+
+  const executeIntent = async (q) => {
+    if (!q || busy || closing) return;
+    if (status) delete status.dataset.sticky;
+    setBusy(true, 'activate-network');
+    try {
+      const { resolveCommercialIntent } = await import('./ontology/intentEngine.js');
+      const resolution = resolveCommercialIntent(q);
+
+      // Update Industry Lens selector if available
+      const lensSelect = document.getElementById('industry-lens-select');
+      if (lensSelect && resolution.vertical?.id) {
+        lensSelect.value = resolution.vertical.id;
+        lensSelect.dispatchEvent(new Event('change'));
+      }
+
+      // Enable the vertical's recommended layers
+      if (Array.isArray(resolution.layersToEnable)) {
+        for (const layerId of resolution.layersToEnable) {
+          try {
+            await dataManager.setEnabled?.(layerId, true, { origin: 'user' });
+          } catch {}
+        }
+      }
+
+      const { activateNetwork } = await import('./portfolio/sitesPanel.js');
+      await activateNetwork(resolution.cleanedSearchQuery || q);
+      dismiss();
+    } catch (err) {
+      console.warn('[First run] Intent activation failed:', err);
+      setBusy(false);
+    }
+  };
+
+  if (intentForm && intentInput) {
+    intentForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await executeIntent(intentInput.value.trim());
+    });
+  }
+
+  for (const pill of intentPills) {
+    pill.addEventListener('click', async (event) => {
+      const sample = event.currentTarget?.dataset?.intentSample;
+      if (sample && intentInput) {
+        intentInput.value = sample;
+        await executeIntent(sample);
+      }
+    });
+  }
 
   const onSuppressChange = (event) => {
     const box = event.currentTarget;

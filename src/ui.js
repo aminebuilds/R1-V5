@@ -9317,6 +9317,18 @@ export class StyleManager {
             this._currentPoi = null;
             this._collapsePOIRow();
             this._updateLocationMiniStatus();
+
+            // Background commercial intent resolution
+            void import('./ontology/intentEngine.js').then(({ resolveCommercialIntent }) => {
+              const res = resolveCommercialIntent(query);
+              if (res.confidence === 'high' || res.confidence === 'medium') {
+                const lensSelect = document.getElementById('industry-lens-select');
+                if (lensSelect && res.vertical?.id && lensSelect.value !== res.vertical.id) {
+                  lensSelect.value = res.vertical.id;
+                  lensSelect.dispatchEvent(new Event('change'));
+                }
+              }
+            }).catch(() => null);
           } else {
             this._showToast('Location not found');
           }

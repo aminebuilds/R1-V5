@@ -1,0 +1,1639 @@
+<title>God's Eye View R.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   GEV R.1 — this document is written in the system it specifies.
+   Dark-committed by intent: the subject is a night-side console.
+   Every colour is painted explicitly from a token; nothing is
+   inherited from the host ground.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: dark;
+
+  /* — Ground stack: cold near-black, biased green-blue toward signal — */
+  --ground:      #06080A;
+  --plate-sunk:  #04070A;
+  --plate:       #0D1216;
+  --plate-hi:    #121A20;
+  --plate-top:   #18222A;
+
+  /* — Structure — */
+  --line:        #1C242B;
+  --line-strong: #2E3941;
+  --line-live:   #3A4750;
+
+  /* — Ink — */
+  --ink:         #E4EAEE;
+  --ink-2:       #8B98A3;
+  --ink-3:       #5A6670;
+  --ink-4:       #39434B;
+
+  /* — Semantic. The only chromatics permitted in chrome. — */
+  --signal:      #62E0A8;
+  --signal-sunk: #0E2A21;
+  --caution:     #F2B33D;
+  --caution-sunk:#2C2110;
+  --alert:       #FF6A45;
+  --alert-sunk:  #2E1409;
+
+  /* — Geometry — */
+  --r-0: 0px;
+  --r-1: 2px;
+  --r-2: 3px;
+  --stroke: 1px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 72px;
+
+  --ff-ui:   'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --ff-data: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-1: 90ms;
+  --t-2: 160ms;
+  --t-3: 260ms;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--ff-ui);
+  font-size: 13.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Faint orthographic grid — the only ambient texture in the system.
+   It reads as a chart ground, not as decoration. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, rgba(120, 150, 165, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(120, 150, 165, 0.035) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse 120% 80% at 50% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 120% 80% at 50% 0%, #000 0%, transparent 78%);
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--s-5) var(--s-8);
+}
+
+/* ─── System strip ───────────────────────────────────────────── */
+
+.strip {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: 40px;
+  padding: 0 var(--s-4);
+  margin: 0 calc(var(--s-5) * -1) var(--s-7);
+  background: var(--plate);
+  border-bottom: var(--stroke) solid var(--line-strong);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+.strip::-webkit-scrollbar { display: none; }
+.strip b {
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+.strip .sep {
+  width: var(--stroke);
+  height: 14px;
+  background: var(--line-strong);
+  flex: none;
+}
+.strip .live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--signal);
+}
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--signal);
+  flex: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .strip .dot { animation: breathe 2.4s var(--ease) infinite; }
+}
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.28; } }
+
+/* ─── Masthead ───────────────────────────────────────────────── */
+
+.mast { padding-bottom: var(--s-6); }
+
+.eyebrow {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 var(--s-4);
+}
+.eyebrow em {
+  font-style: normal;
+  color: var(--signal);
+}
+
+h1 {
+  margin: 0;
+  font-family: var(--ff-ui);
+  font-size: clamp(30px, 5.4vw, 52px);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  max-width: 15ch;
+}
+h1 span { color: var(--ink-3); }
+
+.standfirst {
+  margin: var(--s-5) 0 0;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--stroke);
+  margin-top: var(--s-6);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.meta div {
+  background: var(--plate);
+  padding: var(--s-3) var(--s-4);
+}
+.meta dt {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 var(--s-1);
+}
+.meta dd {
+  margin: 0;
+  font-family: var(--ff-data);
+  font-size: 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Sections ───────────────────────────────────────────────── */
+
+section {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 0 var(--s-5);
+  padding-top: var(--s-7);
+  margin-top: var(--s-7);
+  border-top: var(--stroke) solid var(--line);
+}
+
+.idx {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  color: var(--ink-4);
+  position: sticky;
+  top: 56px;
+  align-self: start;
+  padding-top: 6px;
+}
+
+.body-col { min-width: 0; }
+
+h2 {
+  margin: 0 0 var(--s-4);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h3 {
+  margin: var(--s-6) 0 var(--s-3);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+h3:first-child { margin-top: 0; }
+
+p { margin: 0 0 var(--s-4); max-width: 68ch; color: var(--ink-2); }
+p.lead { color: var(--ink); }
+p:last-child { margin-bottom: 0; }
+strong { color: var(--ink); font-weight: 600; }
+code {
+  font-family: var(--ff-data);
+  font-size: 0.9em;
+  color: var(--signal);
+  background: var(--signal-sunk);
+  padding: 1px 5px;
+  border-radius: var(--r-1);
+}
+
+/* ─── Laws ───────────────────────────────────────────────────── */
+
+.laws {
+  display: grid;
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.laws li {
+  background: var(--plate);
+  padding: var(--s-4);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--s-3);
+}
+.laws .n {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  color: var(--signal);
+  letter-spacing: 0.1em;
+  padding-top: 3px;
+}
+.laws h4 {
+  margin: 0 0 var(--s-1);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.laws p { margin: 0; font-size: 13px; max-width: 66ch; }
+
+/* ─── Tables ─────────────────────────────────────────────────── */
+
+.tw { overflow-x: auto; margin-bottom: var(--s-4); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--ff-data);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 480px;
+}
+th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0 var(--s-3) var(--s-2) 0;
+  border-bottom: var(--stroke) solid var(--line-strong);
+  white-space: nowrap;
+}
+td {
+  padding: var(--s-2) var(--s-3) var(--s-2) 0;
+  border-bottom: var(--stroke) solid var(--line);
+  color: var(--ink-2);
+  vertical-align: top;
+}
+td:first-child { color: var(--ink); }
+td.num { color: var(--ink); }
+td.bad { color: var(--alert); }
+td.good { color: var(--signal); }
+td.warn { color: var(--caution); }
+
+/* ─── Palette ────────────────────────────────────────────────── */
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+  margin-bottom: var(--s-4);
+}
+.sw { background: var(--plate); padding: 0; }
+.sw .chip { height: 56px; border-bottom: var(--stroke) solid var(--line); }
+.sw .meta-l {
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.sw .name { color: var(--ink); letter-spacing: 0.06em; }
+.sw .hex { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.sw .use { color: var(--ink-4); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ─── Type specimen ──────────────────────────────────────────── */
+
+.spec-type {
+  display: grid;
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.spec-type > div {
+  background: var(--plate);
+  padding: var(--s-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-4);
+  justify-content: space-between;
+}
+.spec-type .sample { color: var(--ink); min-width: 0; }
+.spec-type .rule {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.t-display { font-size: 30px; font-weight: 600; letter-spacing: -0.028em; line-height: 1.05; }
+.t-title   { font-size: 18px; font-weight: 600; letter-spacing: -0.014em; }
+.t-body    { font-size: 13.5px; font-weight: 400; }
+.t-ui      { font-size: 12px; font-weight: 500; letter-spacing: 0.005em; }
+.t-label   { font-family: var(--ff-data); font-size: 10px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2); }
+.t-micro   { font-family: var(--ff-data); font-size: 9px; font-weight: 500; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-3); }
+.t-readout { font-family: var(--ff-data); font-size: 22px; font-weight: 400; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+
+/* ─── Code ───────────────────────────────────────────────────── */
+
+pre {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-4);
+  background: var(--plate-sunk);
+
+  border: var(--stroke) solid var(--line);
+  border-left: 2px solid var(--line-strong);
+  overflow-x: auto;
+  font-family: var(--ff-data);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  tab-size: 2;
+}
+pre .c { color: var(--ink-4); }
+pre .k { color: var(--ink); }
+pre .v { color: var(--signal); }
+
+/* ─── Component specimens ────────────────────────────────────── */
+
+.specimens {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.cell {
+  background: #080B0E;
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.cell > .cap {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.cell > .note {
+  margin-top: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  align-items: flex-start;
+}
+
+/* Plate + brackets */
+.plate {
+  position: relative;
+  background: var(--plate);
+  border: var(--stroke) solid var(--line-strong);
+  border-radius: var(--r-1);
+  padding: var(--s-3) var(--s-4);
+  width: 100%;
+}
+.plate.brk::before,
+.plate.brk::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: var(--stroke) solid var(--signal);
+}
+.plate.brk::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.plate.brk::after  { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+.rd-label {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.rd-value {
+  font-family: var(--ff-data);
+  font-size: 24px;
+  font-weight: 400;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.rd-unit {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.14em;
+}
+.rd-row { display: flex; align-items: baseline; gap: var(--s-2); }
+
+/* Layer chips */
+.chips { display: flex; flex-wrap: wrap; gap: var(--s-2); width: 100%; }
+.chip-l {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 26px;
+  padding: 0 var(--s-3);
+  background: var(--plate);
+  border: var(--stroke) solid var(--line-strong);
+  border-radius: var(--r-1);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: default;
+  transition: border-color var(--t-2) var(--ease), color var(--t-2) var(--ease);
+}
+.chip-l i {
+  width: 4px;
+  height: 4px;
+  background: var(--ink-4);
+  flex: none;
+}
+.chip-l.on    { color: var(--ink); border-color: var(--line-live); }
+.chip-l.on i  { background: var(--signal); }
+.chip-l.load  { color: var(--caution); border-color: var(--caution-sunk); }
+.chip-l.load i{ background: var(--caution); }
+.chip-l.deg   { color: var(--caution); border-color: var(--caution-sunk); }
+.chip-l.deg i { background: transparent; border: var(--stroke) solid var(--caution); width: 5px; height: 5px; }
+.chip-l.fail  { color: var(--alert); border-color: var(--alert-sunk); }
+.chip-l.fail i{ background: var(--alert); }
+@media (prefers-reduced-motion: no-preference) {
+  .chip-l.load i { animation: breathe 1.1s steps(2, end) infinite; }
+}
+
+/* Segmented control */
+.seg {
+  display: inline-flex;
+  border: var(--stroke) solid var(--line-strong);
+  border-radius: var(--r-1);
+  overflow: hidden;
+  background: var(--plate);
+}
+.seg button {
+  appearance: none;
+  border: 0;
+  border-right: var(--stroke) solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 0 var(--s-3);
+  height: 26px;
+  cursor: pointer;
+  transition: background var(--t-1) var(--ease), color var(--t-1) var(--ease);
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--ink); background: var(--plate-hi); }
+.seg button[aria-pressed="true"] {
+  color: var(--ground);
+  background: var(--ink);
+}
+.seg button:focus-visible { outline: var(--stroke) solid var(--signal); outline-offset: -2px; }
+
+/* Rail */
+.rail {
+  width: 48px;
+  background: var(--plate);
+  border: var(--stroke) solid var(--line-strong);
+  border-radius: var(--r-1);
+  display: flex;
+  flex-direction: column;
+}
+.rail button {
+  appearance: none;
+  height: 44px;
+  border: 0;
+  border-bottom: var(--stroke) solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  position: relative;
+  transition: color var(--t-1) var(--ease), background var(--t-1) var(--ease);
+}
+.rail button:last-child { border-bottom: 0; }
+.rail button:hover { color: var(--ink); background: var(--plate-hi); }
+.rail button[aria-current="true"] { color: var(--ink); background: var(--plate-hi); }
+.rail button[aria-current="true"]::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--signal);
+}
+.rail button:focus-visible { outline: var(--stroke) solid var(--signal); outline-offset: -3px; }
+
+/* Data rows */
+.rows { width: 100%; border: var(--stroke) solid var(--line-strong); border-radius: var(--r-1); overflow: hidden; }
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--plate);
+  border-bottom: var(--stroke) solid var(--line);
+  font-family: var(--ff-data);
+  font-size: 11px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--t-1) var(--ease);
+}
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--plate-hi); }
+.row .id { color: var(--ink); letter-spacing: 0.06em; }
+.row .st { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; }
+.row.sel { background: var(--plate-top); box-shadow: inset 2px 0 0 var(--signal); }
+
+/* Slider */
+.sl { width: 100%; }
+.sl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: var(--s-2);
+}
+.sl-head b { color: var(--ink); font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+.sl-track {
+  height: 3px;
+  background: var(--line);
+  position: relative;
+}
+.sl-fill { position: absolute; inset: 0 auto 0 0; width: 62%; background: var(--ink-2); }
+.sl-knob {
+  position: absolute;
+  left: 62%;
+  top: 50%;
+  width: 2px;
+  height: 12px;
+  background: var(--ink);
+  transform: translate(-50%, -50%);
+}
+.sl-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: var(--ff-data);
+  font-size: 9px;
+  color: var(--ink-4);
+  letter-spacing: 0.1em;
+}
+
+/* Status line / toast */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  background: var(--plate);
+  border: var(--stroke) solid var(--line-strong);
+  border-left: 2px solid var(--signal);
+  border-radius: var(--r-1);
+  font-family: var(--ff-data);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+.toast time { margin-left: auto; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.toast.warn { border-left-color: var(--caution); }
+.toast.err  { border-left-color: var(--alert); }
+
+/* ─── Before / after ─────────────────────────────────────────── */
+
+.ba {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.ba > div { background: #080B0E; padding: var(--s-5) var(--s-4); }
+.ba .cap {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  margin-bottom: var(--s-4);
+}
+.ba .cap b { color: var(--alert); font-weight: 500; }
+.ba .cap i { color: var(--signal); font-style: normal; }
+
+/* Legacy specimen — deliberately reproduces the current build */
+.old-panel {
+  background: rgba(12, 12, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px 20px 18px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+.old-title {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: rgba(232, 234, 237, 0.3);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+.old-btns { display: flex; gap: 8px; }
+.old-btn {
+  flex: 1;
+  padding: 14px 10px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 11px;
+  color: rgba(232, 234, 237, 0.5);
+}
+.old-btn.active {
+  border-color: #00d4ff;
+  background: rgba(0, 212, 255, 0.15);
+  color: #e8eaed;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+  text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+}
+
+.new-panel {
+  background: var(--plate);
+  border: var(--stroke) solid var(--line-strong);
+  border-radius: var(--r-1);
+}
+.new-panel .hd {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: var(--stroke) solid var(--line);
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.new-panel .hd .k { margin-left: auto; color: var(--ink-4); }
+.new-btns { display: flex; }
+.new-btn {
+  flex: 1;
+  padding: var(--s-3) var(--s-2);
+  border-right: var(--stroke) solid var(--line);
+  text-align: center;
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.new-btn:last-child { border-right: 0; }
+.new-btn.active { color: var(--ground); background: var(--ink); }
+
+/* ─── Frame diagram ──────────────────────────────────────────── */
+
+.frame {
+  border: var(--stroke) solid var(--line-strong);
+  background: #080B0E;
+  aspect-ratio: 16 / 9.4;
+  min-height: 300px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 264px;
+  grid-template-rows: 36px minmax(0, 1fr) 44px;
+  grid-template-areas:
+    "strip strip strip"
+    "rail  scene ctx"
+    "rail  tport tport";
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.frame > div {
+  border: var(--stroke) solid var(--line);
+  margin: -0.5px;
+  padding: var(--s-2);
+  display: flex;
+  min-width: 0;
+}
+.f-strip { grid-area: strip; align-items: center; background: var(--plate); }
+.f-rail  { grid-area: rail;  background: var(--plate); justify-content: center; writing-mode: vertical-rl; }
+.f-scene { grid-area: scene; align-items: flex-start; justify-content: center;
+  background:
+    radial-gradient(circle at 50% 62%, rgba(98, 224, 168, 0.055) 0%, transparent 58%),
+    #05070A;
+  position: relative; }
+.f-ctx   { grid-area: ctx;   background: var(--plate); align-items: flex-start; }
+.f-tport { grid-area: tport; background: var(--plate); align-items: center; }
+.f-scene .globe {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: min(46%, 190px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: var(--stroke) solid var(--line-live);
+  background: radial-gradient(circle at 38% 32%, #10181E 0%, #06090C 68%);
+}
+.f-scene .globe::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  border: var(--stroke) dashed var(--line);
+}
+.frame .z {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.frame .px { color: var(--ink-4); }
+
+.zones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+  border-top: 0;
+}
+.zones div { background: var(--plate); padding: var(--s-3); }
+.zones dt {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--signal);
+  margin-bottom: var(--s-1);
+}
+.zones dd { margin: 0; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+
+/* ─── Layer hues ─────────────────────────────────────────────── */
+
+.hues {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.hue { background: var(--plate); padding: var(--s-3); display: flex; gap: var(--s-3); align-items: flex-start; }
+.hue .bar { width: 3px; align-self: stretch; min-height: 34px; flex: none; }
+.hue .nm {
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.hue .hx { font-family: var(--ff-data); font-size: 10px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.hue .rp { display: flex; gap: 2px; margin-top: 5px; }
+.hue .rp span { width: 14px; height: 6px; }
+
+/* ─── Prohibited ─────────────────────────────────────────────── */
+
+.no {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+  gap: var(--stroke);
+  background: var(--line);
+  border: var(--stroke) solid var(--line);
+}
+.no li {
+  background: var(--plate);
+  padding: var(--s-3) var(--s-4);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--s-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.no li::before {
+  content: '×';
+  font-family: var(--ff-data);
+  color: var(--alert);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.no b { color: var(--ink); font-weight: 600; }
+
+/* ─── Phases ─────────────────────────────────────────────────── */
+
+.phases { display: grid; gap: var(--stroke); background: var(--line); border: var(--stroke) solid var(--line); }
+.ph { background: var(--plate); padding: var(--s-4); display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--s-4); }
+.ph .tag {
+  font-family: var(--ff-data);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal);
+  padding-top: 3px;
+}
+.ph h4 { margin: 0 0 var(--s-1); font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.ph p { margin: 0 0 var(--s-2); font-size: 12.5px; max-width: 66ch; }
+.ph .files {
+  font-family: var(--ff-data);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+}
+.ph .files span { white-space: nowrap; }
+
+/* ─── Footer ─────────────────────────────────────────────────── */
+
+footer {
+  margin-top: var(--s-7);
+  padding-top: var(--s-4);
+  border-top: var(--stroke) solid var(--line);
+  font-family: var(--ff-data);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+}
+
+/* ─── Narrow ─────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .shell { padding: 0 var(--s-4) var(--s-7); }
+  .strip { margin: 0 calc(var(--s-4) * -1) var(--s-6); }
+  section { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+  .idx { position: static; padding-top: 0; }
+  .laws li, .ph { grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+  .frame { grid-template-columns: 40px minmax(0, 1fr); grid-template-areas: "strip strip" "rail scene" "rail tport"; aspect-ratio: auto; }
+  .f-ctx { display: none; }
+}
+</style>
+
+<div class="shell">
+
+  <div class="strip">
+    <b>GEV</b><span class="sep"></span>
+    <span>Redesign R.1</span><span class="sep"></span>
+    <span>Visual identity &amp; interface</span>
+    <span class="live"><span class="dot"></span>Draft for build</span>
+  </div>
+
+  <header class="mast">
+    <p class="eyebrow">God's Eye View <em>/</em> Specification R.1 <em>/</em> 2026-08-29</p>
+    <h1>The earth is the only light <span>source.</span></h1>
+    <p class="standfirst">
+      Everything the chrome does today — the blur, the glow, the sixteen-pixel corners, the cyan
+      halo on every active control — competes with a photoreal globe for the same attention.
+      R.1 turns the interface into an instrument: opaque plates, hairline edges, achromatic
+      steel, and colour held in reserve so that when something goes green, amber or red it
+      means something. Apple's restraint and optical discipline; Palantir's density and
+      mission-console grammar. No decoration survives that isn't carrying data.
+    </p>
+    <dl class="meta">
+      <div><dt>Scope</dt><dd>All HUD chrome</dd></div>
+      <div><dt>Excludes</dt><dd>GLSL styles, globe</dd></div>
+      <div><dt>Supersedes</dt><dd>style.css :root</dd></div>
+      <div><dt>Surface</dt><dd>9,433 lines CSS</dd></div>
+      <div><dt>Status</dt><dd>Draft · unbuilt</dd></div>
+    </dl>
+  </header>
+
+  <!-- ══ 01 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">01</div>
+    <div class="body-col">
+      <h2>The read</h2>
+      <p class="lead">
+        Five things the reference consoles agree on. None of them is a style; all of them are
+        structural decisions that happen to produce the look.
+      </p>
+
+      <ol class="laws">
+        <li><span class="n">A</span><div>
+          <h4>Chrome is opaque, the scene is not</h4>
+          <p>Panels sit on flat plates that fully occlude what's behind them. Nothing is
+          translucent. Legibility never depends on what the map happens to be showing.</p>
+        </div></li>
+        <li><span class="n">B</span><div>
+          <h4>Separation by edge, not by shadow</h4>
+          <p>One-pixel hairlines and shared gutters do all the work a drop shadow was doing.
+          Depth is read from value steps between plates, not from blur.</p>
+        </div></li>
+        <li><span class="n">C</span><div>
+          <h4>The frame is fixed</h4>
+          <p>A top strip, a left rail, a right context column, a bottom transport. Elements
+          have addresses. Nothing floats, nothing is dragged, nothing overlaps by accident.</p>
+        </div></li>
+        <li><span class="n">D</span><div>
+          <h4>Density is the point</h4>
+          <p>Many small labelled cells beat few large ones. Whitespace is structural — gutters
+          and alignment — never padding sprayed on to make a card feel calm.</p>
+        </div></li>
+        <li><span class="n">E</span><div>
+          <h4>Colour is a claim</h4>
+          <p>Chrome is grey. When a hue appears it asserts something: this is live, this is
+          stale, this is on fire. A hue used because it looks good has spent the budget.</p>
+        </div></li>
+      </ol>
+
+      <h3>What the current build does instead</h3>
+      <p>Measured against <code>style.css</code> as it stands today.</p>
+      <div class="tw">
+        <table>
+          <thead>
+            <tr><th>Signal</th><th>Now</th><th>R.1 ceiling</th><th>Why it matters</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Distinct <code>border-radius</code> values</td><td class="bad">20</td><td class="good">3</td><td>Corner radius is currently noise, not a system</td></tr>
+            <tr><td><code>backdrop-filter</code> declarations</td><td class="bad">58</td><td class="good">4</td><td>Every blurred panel is a GPU cost and a legibility gamble</td></tr>
+            <tr><td><code>box-shadow</code> declarations</td><td class="bad">112</td><td class="good">8</td><td>Shadow is standing in for a value scale that doesn't exist</td></tr>
+            <tr><td><code>text-shadow</code> declarations</td><td class="bad">29</td><td class="good">0</td><td>Glowing text is the single loudest slop tell</td></tr>
+            <tr><td>Chromatic hues in chrome</td><td class="warn">1, decorative</td><td class="good">1, semantic</td><td><code>#00d4ff</code> marks active, hover, focus, label and mood alike</td></tr>
+            <tr><td>Font families loaded</td><td class="warn">4</td><td class="good">3</td><td>Inter + JetBrains Mono + two icon sets, one of them legacy</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The diagnosis is not "it looks dated." It is that the chrome has no value scale, so it
+        borrows contrast from blur and glow — and blur and glow are exactly what make an
+        interface read as generated rather than engineered.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 02 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">02</div>
+    <div class="body-col">
+      <h2>Six laws</h2>
+      <p class="lead">Binding. A change that violates one of these is wrong even if it looks better in isolation.</p>
+      <ol class="laws">
+        <li><span class="n">01</span><div>
+          <h4>The map is the only light source</h4>
+          <p>Chrome never emits. No glow, no bloom, no luminous borders. If a control needs to
+          be found, raise its value or give it an edge — do not make it shine.</p>
+        </div></li>
+        <li><span class="n">02</span><div>
+          <h4>Chrome is achromatic</h4>
+          <p>Panels, rails, labels, borders and inactive states are pure steel. Saturation is
+          reserved for the semantic set and for the data layers themselves.</p>
+        </div></li>
+        <li><span class="n">03</span><div>
+          <h4>Edges, not shadows</h4>
+          <p>A 1px hairline plus a one-step value change is the only permitted separation.
+          Shadow is allowed on exactly one thing: a true overlay that floats above the frame.</p>
+        </div></li>
+        <li><span class="n">04</span><div>
+          <h4>Type carries the hierarchy</h4>
+          <p>Size, weight, case and letter-spacing establish rank before colour is consulted.
+          If a label needs colour to read as secondary, the type scale is wrong.</p>
+        </div></li>
+        <li><span class="n">05</span><div>
+          <h4>Every number is monospaced and tabular</h4>
+          <p>Altitude, bearing, count, timestamp, percentage. Digits that jitter as they update
+          destroy the instrument illusion faster than any styling error.</p>
+        </div></li>
+        <li><span class="n">06</span><div>
+          <h4>Motion reports state; it never performs</h4>
+          <p>Animation is permitted to show that something changed, arrived, or is waiting.
+          It is not permitted to make an arrival feel impressive. No idle shimmer, ever.</p>
+        </div></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ══ 03 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">03</div>
+    <div class="body-col">
+      <h2>Palette</h2>
+      <p class="lead">
+        Twelve values. The neutrals are cooled toward green-blue so they sit under the signal
+        hue as a family rather than reading as generic charcoal.
+      </p>
+
+      <h3>Ground &amp; structure</h3>
+      <div class="swatches">
+        <div class="sw"><div class="chip" style="background:#06080A"></div><div class="meta-l"><div class="name">ground</div><div class="hex">#06080A</div><div class="use">App backdrop</div></div></div>
+        <div class="sw"><div class="chip" style="background:#0D1216"></div><div class="meta-l"><div class="name">plate</div><div class="hex">#0D1216</div><div class="use">Panel surface</div></div></div>
+        <div class="sw"><div class="chip" style="background:#121A20"></div><div class="meta-l"><div class="name">plate-hi</div><div class="hex">#121A20</div><div class="use">Hover / raised</div></div></div>
+        <div class="sw"><div class="chip" style="background:#18222A"></div><div class="meta-l"><div class="name">plate-top</div><div class="hex">#18222A</div><div class="use">Selected row</div></div></div>
+        <div class="sw"><div class="chip" style="background:#1C242B"></div><div class="meta-l"><div class="name">line</div><div class="hex">#1C242B</div><div class="use">Internal rule</div></div></div>
+        <div class="sw"><div class="chip" style="background:#2E3941"></div><div class="meta-l"><div class="name">line-strong</div><div class="hex">#2E3941</div><div class="use">Panel border</div></div></div>
+      </div>
+
+      <h3>Ink</h3>
+      <div class="swatches">
+        <div class="sw"><div class="chip" style="background:#E4EAEE"></div><div class="meta-l"><div class="name">ink</div><div class="hex">#E4EAEE</div><div class="use">Values, titles</div></div></div>
+        <div class="sw"><div class="chip" style="background:#8B98A3"></div><div class="meta-l"><div class="name">ink-2</div><div class="hex">#8B98A3</div><div class="use">Body, secondary</div></div></div>
+        <div class="sw"><div class="chip" style="background:#5A6670"></div><div class="meta-l"><div class="name">ink-3</div><div class="hex">#5A6670</div><div class="use">Labels, units</div></div></div>
+        <div class="sw"><div class="chip" style="background:#39434B"></div><div class="meta-l"><div class="name">ink-4</div><div class="hex">#39434B</div><div class="use">Disabled, ticks</div></div></div>
+      </div>
+
+      <h3>Semantic — the entire chromatic budget</h3>
+      <div class="swatches">
+        <div class="sw"><div class="chip" style="background:#62E0A8"></div><div class="meta-l"><div class="name">signal</div><div class="hex">#62E0A8</div><div class="use">Live · active · locked</div></div></div>
+        <div class="sw"><div class="chip" style="background:#F2B33D"></div><div class="meta-l"><div class="name">caution</div><div class="hex">#F2B33D</div><div class="use">Loading · stale · degraded</div></div></div>
+        <div class="sw"><div class="chip" style="background:#FF6A45"></div><div class="meta-l"><div class="name">alert</div><div class="hex">#FF6A45</div><div class="use">Failed · critical</div></div></div>
+      </div>
+
+      <p>
+        <strong>Mint, not cyan.</strong> Dropping <code>#00d4ff</code> is deliberate. Neon cyan on
+        near-black is the default sci-fi HUD of the last decade and it is also the hue the globe's
+        ocean and atmosphere already occupy — chrome and terrain were fighting for the same
+        wavelength. Mint phosphor separates cleanly from ocean blue, survives on a bright daylight
+        basemap, and carries the instrument association without the arcade.
+      </p>
+      <p>
+        <strong>Selection is white, not coloured.</strong> The strongest emphasis in the system is
+        an inverted plate — <code>ink</code> ground, <code>ground</code> text. Signal green is spent
+        only on state that came from the data, never on "you clicked this."
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 04 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">04</div>
+    <div class="body-col">
+      <h2>Type</h2>
+      <p class="lead">
+        <strong>Archivo</strong> for interface, <strong>IBM Plex Mono</strong> for everything with a
+        number or a status in it. Inter is retired — it is the neutral default that makes every
+        product look like every other product, and its wide apertures go soft at the 9–10px label
+        sizes this console lives at. Archivo's tighter, squarer grotesk holds shape at small caps
+        and reads as silkscreen on an instrument face.
+      </p>
+
+      <div class="spec-type">
+        <div><span class="sample t-display">Reykjanes ridge</span><span class="rule">Archivo 600 · 30/1.05 · −0.028em</span></div>
+        <div><span class="sample t-title">Contact 4 of 19</span><span class="rule">Archivo 600 · 18/1.2 · −0.014em</span></div>
+        <div><span class="sample t-body">Fourteen vessels inside the 250 km window.</span><span class="rule">Archivo 400 · 13.5/1.6</span></div>
+        <div><span class="sample t-ui">Reset view</span><span class="rule">Archivo 500 · 12/1.35</span></div>
+        <div><span class="sample t-label">Ground speed</span><span class="rule">Plex Mono 500 · 10 · 0.20em · UC</span></div>
+        <div><span class="sample t-micro">Available inputs only</span><span class="rule">Plex Mono 500 · 9 · 0.24em · UC</span></div>
+        <div><span class="sample t-readout">37.7763 · −122.4379</span><span class="rule">Plex Mono 400 · 22 · tabular</span></div>
+      </div>
+
+      <h3>Rules</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Role</th><th>Face</th><th>Size / spacing</th><th>Applies to</th></tr></thead>
+          <tbody>
+            <tr><td>Display</td><td>Archivo 600</td><td>30px · −0.028em</td><td>Panel titles at hero scale only</td></tr>
+            <tr><td>Title</td><td>Archivo 600</td><td>18px · −0.014em</td><td>Callsign, place name, contact subject</td></tr>
+            <tr><td>Body</td><td>Archivo 400</td><td>13.5px / 1.62</td><td>Sentences. Rare in this UI.</td></tr>
+            <tr><td>UI</td><td>Archivo 500</td><td>12px</td><td>Button labels in sentence case</td></tr>
+            <tr><td>Label</td><td>Plex Mono 500</td><td>10px · 0.20em · UC</td><td>Every field name</td></tr>
+            <tr><td>Micro</td><td>Plex Mono 500</td><td>9px · 0.24em · UC</td><td>Qualifiers, credits, tick marks</td></tr>
+            <tr><td>Readout</td><td>Plex Mono 400</td><td>22px · tabular</td><td>Altitude, speed, heading, coords</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Only two letter-spacing values exist for uppercase: <code>0.20em</code> for labels,
+        <code>0.24em</code> for micro. The current build uses eleven, ranging from 0.3px to 3px,
+        which is why nothing lines up optically. All numerics carry
+        <code>font-variant-numeric: tabular-nums</code> without exception.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 05 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">05</div>
+    <div class="body-col">
+      <h2>Geometry &amp; the token block</h2>
+
+      <h3>Constants</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Property</th><th>Values</th><th>Rule</th></tr></thead>
+          <tbody>
+            <tr><td>Radius</td><td class="num">0 · 2 · 3</td><td>2px is the default. 0 for full-bleed rails and strips. 3px only on overlays. Nothing else exists.</td></tr>
+            <tr><td>Stroke</td><td class="num">1px</td><td>One weight. Emphasis comes from the hairline's colour, not its thickness. The single exception is the 2px state spine on a selected row or toast.</td></tr>
+            <tr><td>Spacing</td><td class="num">4 · 8 · 12 · 16 · 24 · 32 · 48 · 72</td><td>4px base. Panel padding is 12 or 16. Section gaps are 24 or 32.</td></tr>
+            <tr><td>Elevation</td><td class="num">4 plates</td><td>ground → plate → plate-hi → plate-top. Depth is a value step. There is no z-shadow ladder.</td></tr>
+            <tr><td>Shadow</td><td class="num">1 permitted</td><td><code>0 24px 48px -12px rgba(0,0,0,.72)</code> — popovers and modals only.</td></tr>
+            <tr><td>Blur</td><td class="num">0</td><td>No <code>backdrop-filter</code> in chrome. Reserved for the cockpit visor optics, which are scene, not UI.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Drop-in replacement for the <code>:root</code> block</h3>
+      <p>Existing variable names are preserved wherever they carry the same meaning, so the
+      9,433-line stylesheet re-skins on the first paste before any component work starts.</p>
+      <pre><span class="c">/* style.css — GEV R.1 */</span>
+<span class="k">:root</span> {
+  <span class="c">/* ground stack */</span>
+  <span class="k">--bg-dark</span>:        <span class="v">#06080A</span>;
+  <span class="k">--plate</span>:          <span class="v">#0D1216</span>;
+  <span class="k">--plate-hi</span>:       <span class="v">#121A20</span>;
+  <span class="k">--plate-top</span>:      <span class="v">#18222A</span>;
+  <span class="k">--glass-bg</span>:       <span class="v">#0D1216</span>;   <span class="c">/* opaque now — name kept for the diff */</span>
+
+  <span class="c">/* structure */</span>
+  <span class="k">--line</span>:           <span class="v">#1C242B</span>;
+  <span class="k">--glass-border</span>:   <span class="v">#2E3941</span>;
+  <span class="k">--glass-border-hover</span>: <span class="v">#3A4750</span>;
+
+  <span class="c">/* ink */</span>
+  <span class="k">--text-primary</span>:   <span class="v">#E4EAEE</span>;
+  <span class="k">--text-secondary</span>: <span class="v">#8B98A3</span>;
+  <span class="k">--text-dim</span>:       <span class="v">#5A6670</span>;
+  <span class="k">--text-ghost</span>:     <span class="v">#39434B</span>;
+
+  <span class="c">/* semantic — the whole chromatic budget */</span>
+  <span class="k">--signal</span>:         <span class="v">#62E0A8</span>;
+  <span class="k">--signal-sunk</span>:    <span class="v">#0E2A21</span>;
+  <span class="k">--caution</span>:        <span class="v">#F2B33D</span>;
+  <span class="k">--alert</span>:          <span class="v">#FF6A45</span>;
+  <span class="k">--accent</span>:         <span class="v">var(--signal)</span>;  <span class="c">/* alias during migration, then delete */</span>
+
+  <span class="c">/* geometry */</span>
+  <span class="k">--panel-radius</span>:   <span class="v">2px</span>;
+  <span class="k">--btn-radius</span>:     <span class="v">2px</span>;
+  <span class="k">--overlay-radius</span>: <span class="v">3px</span>;
+  <span class="k">--stroke</span>:         <span class="v">1px</span>;
+  <span class="k">--shadow-overlay</span>: <span class="v">0 24px 48px -12px rgba(0,0,0,.72)</span>;
+
+  <span class="c">/* type */</span>
+  <span class="k">--font-sans</span>:      <span class="v">'Archivo', 'Helvetica Neue', Arial, sans-serif</span>;
+  <span class="k">--font-mono</span>:      <span class="v">'IBM Plex Mono', ui-monospace, Menlo, monospace</span>;
+  <span class="k">--track-label</span>:    <span class="v">0.20em</span>;
+  <span class="k">--track-micro</span>:    <span class="v">0.24em</span>;
+
+  <span class="c">/* motion */</span>
+  <span class="k">--ease</span>:           <span class="v">cubic-bezier(0.2, 0, 0, 1)</span>;
+  <span class="k">--t-fast</span>:         <span class="v">90ms</span>;
+  <span class="k">--t-base</span>:         <span class="v">160ms</span>;
+  <span class="k">--t-slow</span>:         <span class="v">260ms</span>;
+}</pre>
+      <p>
+        Deletions, not additions, do most of the work: strike every <code>--accent-glow</code>,
+        <code>--accent-dim</code>, <code>text-shadow</code> and <code>backdrop-filter</code>
+        reference in the file. That single pass is roughly 87 declarations and lands most of the
+        visual change before a single component is rebuilt.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 06 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">06</div>
+    <div class="body-col">
+      <h2>Components</h2>
+      <p class="lead">Live specimens, rendered from the tokens above. These are the specification —
+      not illustrations of it.</p>
+
+      <div class="specimens">
+
+        <div class="cell">
+          <span class="cap">Plate · bracketed</span>
+          <div class="stage">
+            <div class="plate brk">
+              <div class="rd-label">Focus target</div>
+              <div class="rd-row"><span class="rd-value">SFO</span><span class="rd-unit">KSFO · 37.62N</span></div>
+            </div>
+          </div>
+          <p class="note">Bracket ticks mark the one element holding focus. Corners only — never a full outline, never a glow.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Readout</span>
+          <div class="stage">
+            <div class="plate" style="display:flex;gap:24px;">
+              <div><div class="rd-label">Altitude</div><div class="rd-row"><span class="rd-value">34,000</span><span class="rd-unit">ft</span></div></div>
+              <div><div class="rd-label">Speed</div><div class="rd-row"><span class="rd-value">468</span><span class="rd-unit">kts</span></div></div>
+            </div>
+          </div>
+          <p class="note">Label above, value below, unit trailing at label weight. Tabular figures so digits never shift under live update.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Layer chip · five states</span>
+          <div class="stage">
+            <div class="chips">
+              <span class="chip-l"><i></i>Ships</span>
+              <span class="chip-l load"><i></i>Traffic</span>
+              <span class="chip-l on"><i></i>Aircraft</span>
+              <span class="chip-l deg"><i></i>CCTV</span>
+              <span class="chip-l fail"><i></i>Fires</span>
+            </div>
+          </div>
+          <p class="note">Off · loading · live · degraded · failed. State reads from the marker's fill and the border, so it survives at a glance and in greyscale.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Segmented control</span>
+          <div class="stage">
+            <div class="seg" role="group" aria-label="Map source">
+              <button type="button" aria-pressed="true">Photoreal</button>
+              <button type="button" aria-pressed="false">Terrain</button>
+              <button type="button" aria-pressed="false">Flat</button>
+            </div>
+          </div>
+          <p class="note">Selection inverts to white-on-ground. No accent hue — the emphasis is value, so it never competes with live-data green.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Tool rail</span>
+          <div class="stage" style="flex-direction:row;">
+            <nav class="rail" aria-label="Tools">
+              <button type="button" aria-current="true" aria-label="Layers">LYR</button>
+              <button type="button" aria-label="Search">SRC</button>
+              <button type="button" aria-label="Styles">STY</button>
+              <button type="button" aria-label="Voice">VOX</button>
+            </nav>
+          </div>
+          <p class="note">48px, flush to the viewport edge, square corners. Active state is a 2px signal spine plus a value step — no fill, no icon glow.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Contact list</span>
+          <div class="stage">
+            <div class="rows">
+              <div class="row"><span class="id">UAL 1284</span><span>34,000</span><span class="st" style="color:var(--signal)">live</span></div>
+              <div class="row sel"><span class="id">SWA 2291</span><span>28,750</span><span class="st" style="color:var(--signal)">live</span></div>
+              <div class="row"><span class="id">DAL 0517</span><span>—</span><span class="st" style="color:var(--caution)">stale</span></div>
+            </div>
+          </div>
+          <p class="note">Rows are 1px-separated, not carded. Selection is a value step plus a spine — no border, no lift, no transform.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Quantitative slider</span>
+          <div class="stage">
+            <div class="sl">
+              <div class="sl-head"><span>Detection density</span><b>0.62</b></div>
+              <div class="sl-track"><div class="sl-fill"></div><div class="sl-knob"></div></div>
+              <div class="sl-ticks"><span>0.00</span><span>0.50</span><span>1.00</span></div>
+            </div>
+          </div>
+          <p class="note">3px track, 2px blade knob, endpoints labelled. The value is always printed — a slider that only shows a position isn't an instrument.</p>
+        </div>
+
+        <div class="cell">
+          <span class="cap">Status line</span>
+          <div class="stage">
+            <div class="toast">AIS stream connected · 1,204 vessels<time>08:14:22Z</time></div>
+            <div class="toast warn">TomTom key absent — simulated traffic<time>08:14:09Z</time></div>
+          </div>
+          <p class="note">Left spine carries severity. Timestamp right-aligned and monospaced. Messages state what happened, then what it means.</p>
+        </div>
+
+      </div>
+
+      <h3>Before / after</h3>
+      <div class="ba">
+        <div>
+          <div class="cap"><b>Now</b> — glass, 16px radius, cyan halo</div>
+          <div class="old-panel">
+            <div class="old-title">Visual style</div>
+            <div class="old-btns">
+              <div class="old-btn active">Normal</div>
+              <div class="old-btn">Thermal</div>
+              <div class="old-btn">Night</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="cap"><i>R.1</i> — plate, 2px radius, inverted selection</div>
+          <div class="new-panel">
+            <div class="hd">Visual style<span class="k">1–3</span></div>
+            <div class="new-btns">
+              <div class="new-btn active">Normal</div>
+              <div class="new-btn">Thermal</div>
+              <div class="new-btn">Night</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 07 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">07</div>
+    <div class="body-col">
+      <h2>The frame</h2>
+      <p class="lead">
+        The largest structural change. Today the HUD is a set of floating, draggable, collapsible
+        glass islands with hard-coded offsets — <code>--left-stack-x: 52px</code>,
+        <code>--left-stack-top: 26vh</code> — that overlap unpredictably at small viewports. R.1
+        replaces them with four fixed regions and one scene.
+      </p>
+
+      <div class="frame" role="img" aria-label="Console frame: 36px top status strip, 48px left tool rail, central scene, 264px right context column, 44px bottom transport bar.">
+        <div class="f-strip"><span class="z">STATUS STRIP</span>&nbsp;<span class="px">· 36px · fixed</span></div>
+        <div class="f-rail"><span class="z">TOOL RAIL · 48px</span></div>
+        <div class="f-scene"><span class="z" style="margin-top:4px">SCENE · uninterrupted</span><div class="globe"></div></div>
+        <div class="f-ctx"><span class="z">CONTEXT · 264px</span></div>
+        <div class="f-tport"><span class="z">TRANSPORT</span>&nbsp;<span class="px">· 44px · time &amp; playback</span></div>
+      </div>
+      <dl class="zones">
+        <div><dt>Status strip · 36px</dt><dd>Identity, active style, clock, connection state, global loading. Everything that is true of the whole system, nothing that is true of one layer.</dd></div>
+        <div><dt>Tool rail · 48px</dt><dd>Mode switching only — layers, search, styles, voice. Four to six entries, never a scrolling list.</dd></div>
+        <div><dt>Scene</dt><dd>Never covered. Panels resize the scene rather than float over it; the globe recentres on region change.</dd></div>
+        <div><dt>Context · 264px</dt><dd>Whatever is selected. Collapses to 0 with the scene expanding — it does not slide over the map.</dd></div>
+        <div><dt>Transport · 44px</dt><dd>Time, playback, feed freshness. The one place a timeline lives.</dd></div>
+      </dl>
+      <p style="margin-top:var(--s-4)">
+        <strong>Dragging is removed.</strong> Draggable panels exist to escape a layout that doesn't
+        work; a frame that works has no need of them. The saved-position code in the panel handlers
+        goes with it.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 08 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">08</div>
+    <div class="body-col">
+      <h2>Colour in the data</h2>
+      <p class="lead">
+        The chrome gave up its colour so the layers could have it. One hue per layer, used on the
+        map marker and on that layer's chip and nowhere else — so a colour anywhere on screen
+        always answers "which feed is this?"
+      </p>
+
+      <div class="hues">
+        <div class="hue"><span class="bar" style="background:#7FC8FF"></span><div><div class="nm">Aircraft</div><div class="hx">#7FC8FF</div></div></div>
+        <div class="hue"><span class="bar" style="background:#4FD6C0"></span><div><div class="nm">Ships</div><div class="hx">#4FD6C0</div></div></div>
+        <div class="hue"><span class="bar" style="background:#B9C6D0"></span><div><div class="nm">Satellites</div><div class="hx">#B9C6D0</div></div></div>
+        <div class="hue"><span class="bar" style="background:#9AA7B2"></span><div><div class="nm">CCTV</div><div class="hx">#9AA7B2</div></div></div>
+        <div class="hue"><span class="bar" style="background:#C0D46A"></span><div><div class="nm">Bikeshare</div><div class="hx">#C0D46A</div></div></div>
+        <div class="hue"><span class="bar" style="background:#FF7A2F"></span><div><div class="nm">Fires</div><div class="hx">#FF7A2F</div></div></div>
+      </div>
+
+      <h3>Ramps, where magnitude is the message</h3>
+      <div class="hues" style="border-top:0">
+        <div class="hue">
+          <span class="bar" style="background:linear-gradient(#4FD6C0,#F2B33D,#FF5A3C)"></span>
+          <div><div class="nm">Traffic</div><div class="hx">free → heavy</div>
+          <div class="rp"><span style="background:#4FD6C0"></span><span style="background:#A8CF7E"></span><span style="background:#F2B33D"></span><span style="background:#FF8A4A"></span><span style="background:#FF5A3C"></span></div></div>
+        </div>
+        <div class="hue">
+          <span class="bar" style="background:linear-gradient(#F2B33D,#FF6A45,#FF3B2F)"></span>
+          <div><div class="nm">Earthquakes</div><div class="hx">M2 → M7+</div>
+          <div class="rp"><span style="background:#F2B33D"></span><span style="background:#FF9236"></span><span style="background:#FF6A45"></span><span style="background:#FF4A38"></span><span style="background:#FF3B2F"></span></div></div>
+        </div>
+      </div>
+
+      <p style="margin-top:var(--s-4)">
+        Traffic and earthquakes are quantities, not categories, so they get ordered ramps rather than
+        a single hue. Both ramps are luminance-ordered as well as hue-ordered, which keeps them
+        readable when the basemap goes bright and for red-green colour deficiency.
+      </p>
+      <p>
+        <strong>The overlap rule.</strong> Two layers on screen must never share a hue family. If a
+        seventh categorical layer arrives and no distinct hue is left, that is the signal to
+        introduce shape or a second visual channel — not to squeeze in another orange.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 09 ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">09</div>
+    <div class="body-col">
+      <h2>Motion</h2>
+      <p class="lead">One easing curve, three durations, and a short list of things allowed to move.</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Event</th><th>Duration</th><th>Property</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Hover / press</td><td class="num">90ms</td><td>background, color, border-color</td><td>No transform. Buttons do not lift.</td></tr>
+            <tr><td>Panel open / close</td><td class="num">160ms</td><td>width, opacity</td><td>The scene reflows with it; nothing slides over the map.</td></tr>
+            <tr><td>Value update</td><td class="num">0ms</td><td>—</td><td>Numbers snap. A tweened altitude is a lie about the data.</td></tr>
+            <tr><td>Row / contact arrival</td><td class="num">160ms</td><td>opacity 0→1</td><td>Fade only. No slide, no stagger.</td></tr>
+            <tr><td>Awaiting data</td><td class="num">1.1s loop</td><td>opacity, 2 steps</td><td>Square-wave blink on the chip marker. Not a smooth pulse — a smooth pulse reads as ambience, a blink reads as a status light.</td></tr>
+            <tr><td>Camera flight</td><td class="num">scene-owned</td><td>Cesium easing</td><td>Unchanged. Camera motion is the app's one cinematic moment; keep it.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Easing is <code>cubic-bezier(0.2, 0, 0, 1)</code> throughout: fast departure, long settle.
+        Every animation sits behind <code>prefers-reduced-motion</code>, including the blink, which
+        falls back to a static caution-filled marker.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ 10 ══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">10</div>
+    <div class="body-col">
+      <h2>Prohibited</h2>
+      <p class="lead">
+        Not stylistic preferences. Each of these is a specific tell that reads as generated rather
+        than designed, and each one currently appears in the build or in its obvious next iteration.
+      </p>
+      <ul class="no">
+        <li><span><b>Glassmorphism as a default.</b> Translucent blurred panels everywhere. Blur is a scene effect, not a panel treatment.</span></li>
+        <li><span><b>Glow as emphasis.</b> <code>text-shadow</code> on labels, halo on active buttons, radial bloom behind panels.</span></li>
+        <li><span><b>Neon cyan on black.</b> The stock sci-fi HUD. It also collides with the ocean.</span></li>
+        <li><span><b>Purple-to-blue gradients.</b> Anywhere, at any opacity, including as a "subtle" panel wash.</span></li>
+        <li><span><b>Inter and Space Grotesk.</b> The two faces that make an interface look like every AI-built product of the last two years.</span></li>
+        <li><span><b>Emoji as iconography.</b> The share button's 🔗 goes. Icons are a single monoline set or nothing.</span></li>
+        <li><span><b>Warm clay, terracotta and cream.</b> The current house palette of AI-generated design. This console is cold; keep it cold.</span></li>
+        <li><span><b>Pill radii on rectangles.</b> <code>999px</code> is for a marker dot, never for a button, chip or panel.</span></li>
+        <li><span><b>Idle animation.</b> Shimmer, breathing gradients, drifting particles, ambient scanlines. If nothing changed, nothing moves.</span></li>
+        <li><span><b>Shadow as hierarchy.</b> Stacked <code>box-shadow</code> ladders standing in for a value scale.</span></li>
+        <li><span><b>Centred hero cards.</b> A console has regions with addresses, not a poster with a focal point.</span></li>
+        <li><span><b>Decorative numerals.</b> 01 / 02 / 03 markers on content that isn't a sequence. Numbering must be citable.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══ 11 ══════════════════════════════════════════════════ -->
+  <section>
+    <div class="idx">11</div>
+    <div class="body-col">
+      <h2>Migration</h2>
+      <p class="lead">
+        Four phases, ordered so the largest visual change lands first and the riskiest structural
+        change lands last. Each phase is independently shippable and independently revertable.
+      </p>
+
+      <div class="phases">
+        <div class="ph">
+          <div class="tag">Phase 1<br>~2h</div>
+          <div>
+            <h4>Token swap and strip-out</h4>
+            <p>Replace the <code>:root</code> block, swap the Google Fonts link, then delete every
+            <code>text-shadow</code>, <code>backdrop-filter</code> and glow-related declaration in
+            the stylesheet. Normalise all 20 radius values down to 2px / 3px / 50%. No markup
+            changes. This is where most of the look arrives.</p>
+            <div class="files"><span>style.css</span><span>index.html</span></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="tag">Phase 2<br>~4h</div>
+          <div>
+            <h4>Component rebuild</h4>
+            <p>Rewrite the specimen set from §06 against the existing class names — panel, style
+            button, layer chip, slider, list row, toast, segmented control. Class names stay put so
+            the JS that toggles them is untouched.</p>
+            <div class="files"><span>style.css</span><span>src/ui.js</span></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="tag">Phase 3<br>~3h</div>
+          <div>
+            <h4>Layer colour system</h4>
+            <p>Move the per-layer hues and the two ramps from §08 into shared tokens consumed by
+            both the map renderers and the chips, so a layer's colour is defined once.</p>
+            <div class="files"><span>src/data/*.js</span><span>src/data/detectionPresentation.js</span><span>style.css</span></div>
+          </div>
+        </div>
+        <div class="ph">
+          <div class="tag">Phase 4<br>~8h</div>
+          <div>
+            <h4>The frame</h4>
+            <p>Replace the floating stack with the five-region grid from §07. Retire the drag
+            handlers and the <code>--left-stack-*</code> offset variables. Highest risk — the
+            cockpit HUD overlays the same space and needs its own pass.</p>
+            <div class="files"><span>index.html</span><span>src/ui.js</span><span>src/cockpitUtilityLayout.js</span><span>style.css</span></div>
+          </div>
+        </div>
+      </div>
+
+      <h3>Gates — every phase, per CONTRIBUTING.md</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Check</th><th>Command</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Build</td><td><code>npm run build</code></td><td>Must stay clean</td></tr>
+            <tr><td>Unit</td><td><code>npm test</code></td><td>Colocated <code>*.test.mjs</code></td></tr>
+            <tr><td>Track</td><td><code>npm run test:track</code></td><td>Dev server must be up</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Acceptance — R.1 is done when</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Criterion</th><th>Target</th></tr></thead>
+          <tbody>
+            <tr><td>Distinct <code>border-radius</code> values in <code>style.css</code></td><td class="good">≤ 3 (plus 50%)</td></tr>
+            <tr><td><code>text-shadow</code> declarations in chrome</td><td class="good">0</td></tr>
+            <tr><td><code>backdrop-filter</code> declarations</td><td class="good">≤ 4, cockpit optics only</td></tr>
+            <tr><td><code>box-shadow</code> declarations</td><td class="good">≤ 8, overlays only</td></tr>
+            <tr><td>Chromatic hues in chrome</td><td class="good">3, all semantic</td></tr>
+            <tr><td>Numeric readouts using <code>tabular-nums</code></td><td class="good">100%</td></tr>
+            <tr><td>Uppercase letter-spacing values</td><td class="good">2</td></tr>
+            <tr><td>Panels overlapping the scene at 1280×720</td><td class="good">0</td></tr>
+            <tr><td>Chrome legible over a white-desert basemap</td><td class="good">Pass</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The last one is the real test and it is worth running by hand: fly to a bright daytime
+        salt flat at low altitude. If any label, chip or panel becomes hard to read, the chrome is
+        still borrowing contrast from the scene, and something in §02 has been violated.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <span>God's Eye View · Spec R.1</span>
+    <span>2026-08-29</span>
+    <span>Draft — not yet built</span>
+    <span>Supersedes style.css :root</span>
+  </footer>
+
+</div>

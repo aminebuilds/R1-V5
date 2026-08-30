@@ -248,6 +248,31 @@ async function init() {
     // Initialize the voice "whiteboard" annotation engine (world-space renderer)
     const annotations = initAnnotations({ viewer, tileset });
 
+    // Initialize Multi-Industry Lens selector
+    const industrySelect = document.getElementById('industry-lens-select');
+    const mastheadSubtitle = document.getElementById('masthead-subtitle');
+    if (industrySelect) {
+      industrySelect.addEventListener('change', async () => {
+        const val = industrySelect.value;
+        const { getVerticalById } = await import('./ontology/industryOntology.js');
+        const vertical = getVerticalById(val);
+        if (vertical) {
+          if (mastheadSubtitle) {
+            mastheadSubtitle.textContent = `REAL-TIME COMMERCIAL INTELLIGENCE · ${vertical.name.toUpperCase()}`;
+          }
+          if (Array.isArray(vertical.recommendedLayers)) {
+            for (const layerId of vertical.recommendedLayers) {
+              try {
+                await dataManager.setEnabled(layerId, true, { origin: 'user' });
+              } catch {}
+            }
+          }
+        } else if (mastheadSubtitle) {
+          mastheadSubtitle.textContent = 'REAL-TIME COMMERCIAL INTELLIGENCE · ALL INDUSTRIES';
+        }
+      });
+    }
+
     // Keep startup chrome truthful: a share is not restored until camera,
     // visual/map/panel lanes, and every requested layer have terminated.
     void Promise.all([
