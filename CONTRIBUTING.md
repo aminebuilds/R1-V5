@@ -7,8 +7,8 @@ Thanks for being here. God's Eye View is an open foundation for live spatial int
 Use Node.js 24.14.x or 26.x (also enforced by `package.json`).
 
 ```bash
-git clone https://github.com/bilawalsidhu/gods-eye-view.git
-cd gods-eye-view
+git clone https://github.com/aminebuilds/gods-eye-view-world.git
+cd gods-eye-view-world
 nvm install 24.14.0
 nvm use 24.14.0
 npm install

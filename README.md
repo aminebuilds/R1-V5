@@ -16,6 +16,8 @@ Photorealistic 3D globe. Live aircraft, ships, satellites, earthquakes, traffic,
 
 ▶️ **From the project behind the viral God's Eye View series** *(formerly WorldView)* — [5M+ on YouTube](https://youtube.com/playlist?list=PL6qSg2I-7_koPbDnSMo0QeeHX_RknA2uv&si=nBGYMoHWQw41v93Q)
 
+🍴 Originally created and open-sourced by [Bilawal Sidhu](https://github.com/bilawalsidhu/gods-eye-view) — this repository is [Amine](https://github.com/aminebuilds)'s actively maintained fork and build.
+
 </div>
 
 ---
@@ -83,7 +85,7 @@ npm run dev -- --host localhost --port 4173
 > **Not a coder? Have an AI do this whole page for you.** A one-click installer is in the works — until then, install a coding agent ([Claude Code](https://claude.com/claude-code), [Codex](https://openai.com/codex/), [Cursor](https://cursor.com), or [Antigravity](https://antigravity.google)) and paste this:
 >
 > ```text
-> Clone https://github.com/bilawalsidhu/gods-eye-view and set it up on my machine.
+> Clone https://github.com/aminebuilds/gods-eye-view-world and set it up on my machine.
 > Install everything it needs, walk me through getting the required Google Maps API
 > key step by step (plus any optional free keys I want), put the keys in .env, and
 > help me set a billing alert and a usage quota on the Google key so I can't

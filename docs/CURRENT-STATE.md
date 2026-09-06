@@ -1566,8 +1566,9 @@ Historical planning documents may not match runtime behavior.
 
 ## Current Baseline
 
-- Repository metadata and public URLs use the `bilawalsidhu/gods-eye-view`
-  project identity. Runtime behavior is defined by this document and the current
+- Repository metadata and public URLs use the `aminebuilds/gods-eye-view-world`
+  project identity — this fork's own repo, issue tracker, and security contact,
+  not upstream's. Runtime behavior is defined by this document and the current
   source tree rather than historical branch notes.
 
 ## Runtime Stack
