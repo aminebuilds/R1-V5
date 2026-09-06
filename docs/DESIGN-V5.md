@@ -1,4 +1,4 @@
-# God's Eye View — Design Spec R.1
+# God's Eye View — Design Spec V5
 
 **Visual identity & interface specification**
 
@@ -11,12 +11,12 @@
 | **Supersedes** | The `:root` block in `style.css` |
 | **Surface** | 9,433 lines of CSS, 948 lines of `index.html` |
 | **Rendered** | [Artifact](https://claude.ai/code/artifact/0ed6c054-0964-4e9e-8be6-9ff5fcebf1fb) — same content, rendered in the system it specifies |
-| **Source** | [`docs/DESIGN-R1.artifact.html`](DESIGN-R1.artifact.html) — the HTML that produced the artifact |
+| **Source** | [`docs/DESIGN-V5.artifact.html`](DESIGN-V5.artifact.html) — the HTML that produced the artifact |
 
 > **The thesis.** The earth is the only light source.
 >
 > Everything the chrome does today — the blur, the glow, the sixteen-pixel corners, the cyan
-> halo on every active control — competes with a photoreal globe for the same attention. R.1
+> halo on every active control — competes with a photoreal globe for the same attention. V5
 > turns the interface into an instrument: opaque plates, hairline edges, achromatic steel, and
 > colour held in reserve so that when something goes green, amber or red it means something.
 > Apple's restraint and optical discipline; Palantir's density and mission-console grammar.
@@ -53,7 +53,7 @@ on fire. A hue used because it looks good has spent the budget.
 
 Measured against `style.css` as it stands today.
 
-| Signal | Now | R.1 ceiling | Why it matters |
+| Signal | Now | V5 ceiling | Why it matters |
 |---|---|---|---|
 | Distinct `border-radius` values | **20** | 3 | Corner radius is currently noise, not a system |
 | `backdrop-filter` declarations | **58** | 4 | Every blurred panel is a GPU cost and a legibility gamble |
@@ -189,7 +189,7 @@ wherever they carry the same meaning, so the 9,433-line stylesheet re-skins on t
 before any component work starts.
 
 ```css
-/* style.css — GEV R.1 */
+/* style.css — GEV V5 */
 :root {
   color-scheme: dark;
 
@@ -344,7 +344,7 @@ Messages state what happened, then what it means —
 
 ### Before / after
 
-| | Now | R.1 |
+| | Now | V5 |
 |---|---|---|
 | Surface | `rgba(12,12,20,.72)` + `blur(24px)` | `#0D1216`, opaque |
 | Border | `rgba(255,255,255,.08)` | `#2E3941` hairline |
@@ -359,7 +359,7 @@ Messages state what happened, then what it means —
 
 The largest structural change. Today the HUD is a set of floating, draggable, collapsible glass
 islands with hard-coded offsets — `--left-stack-x: 52px`, `--left-stack-top: 26vh` — that
-overlap unpredictably at small viewports. R.1 replaces them with four fixed regions and one
+overlap unpredictably at small viewports. V5 replaces them with four fixed regions and one
 scene.
 
 ```
@@ -520,7 +520,7 @@ npm run test:track
 
 `test:track` requires the dev server to be up. All three must stay green.
 
-### Acceptance — R.1 is done when
+### Acceptance — V5 is done when
 
 | Criterion | Target |
 |---|---|
@@ -544,6 +544,6 @@ contrast from the scene, and something in §02 has been violated.
 
 - **Dark-committed by intent.** There is no light theme. The subject is a night-side console;
   a light mode would be a different product, not a variant.
-- **Updating the artifact.** Edit `docs/DESIGN-R1.artifact.html` and republish it to the same URL
+- **Updating the artifact.** Edit `docs/DESIGN-V5.artifact.html` and republish it to the same URL
   with the `url` parameter. Keep this Markdown and that HTML in sync — the Markdown is canonical
   for implementation, the HTML is canonical for the rendered version.

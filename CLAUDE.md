@@ -22,7 +22,7 @@ Read these in order — they are the actual spec, this file is just the map:
    Don't add a source without an entry here.
 5. [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) — check before "fixing" a
    known quirk.
-6. [docs/DESIGN-R1.md](docs/DESIGN-R1.md) — the visual identity spec. Binding
+6. [docs/DESIGN-V5.md](docs/DESIGN-V5.md) — the visual identity spec. Binding
    for any change to HUD chrome: tokens, type, geometry, motion, and a list
    of prohibited treatments. Not yet built — the current `style.css` still
    predates it, so read §12 for which phase has landed.
