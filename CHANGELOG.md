@@ -3,6 +3,32 @@
 This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
+## [Unreleased] — 2026-09-06
+
+### Changed
+
+- **The project is now R.1 — Commercial Intelligence, a standalone product.**
+  Documentation, package metadata, and the internal namespace describe R.1 on
+  its own terms rather than as a fork. Attribution for the globe substrate R.1
+  grew out of is retained in [README.md](README.md) and [LICENSE](LICENSE).
+- Internal namespace renamed throughout: the debug/QA surface is `window.__r1`,
+  env vars are `R1_*`, browser storage keys are `r1.*`, CSS classes this app
+  owns are `r1-` prefixed, runtime dirs are `.r1-cache` / `.r1-logs`, and the
+  voice modules are `src/voice/r1Actions.js` and `src/voice/r1Realtime.js`.
+  **Stored panel positions and CCTV calibration reset once** on first run after
+  this change, because their storage keys moved.
+- `Banner OS`, the earlier working name for this product, is now `R.1`
+  everywhere.
+- The voice tool-schema pins in `src/firstRunExperience.test.mjs` and
+  `src/radioMarkup.test.mjs` were re-derived: tool descriptions changed with the
+  rename. No tool was added, removed, or given different parameters.
+
+### Removed
+
+- Removed the bundled promotional GIFs and PNGs (~68 MB) that documented the
+  upstream project rather than R.1, along with their provenance file.
+  `docs/media/README.md` now describes what belongs there instead.
+
 ## [Unreleased] — 2026-08-24
 
 ### Added

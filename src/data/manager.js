@@ -2019,6 +2019,7 @@ export class DataLayerManager {
   }
 
   _renderToggles() {
+    this._syncPanelHeaderState();
     if (!this._toggleContainer) return;
     this._toggleContainer.innerHTML = '';
 
@@ -2176,7 +2177,60 @@ export class DataLayerManager {
     }
   }
 
+  /**
+   * Summarise every toggleable layer into the one chip a collapsed DATA LAYERS
+   * panel shows. Severity wins over volume: a single failed feed outranks four
+   * healthy ones, because the four are already doing what the operator expects
+   * and the one is not.
+   *
+   * The count is always of layers actually ENABLED — a panel that reads
+   * "4 live" while three of them are off would be the exact dishonesty the
+   * feed-state vocabulary exists to prevent.
+   */
+  _syncPanelHeaderState() {
+    // Partial DOM stubs (tests, headless) supply a document without the
+    // lookup — feature-detect rather than assume one implies the other.
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+    const el = document.getElementById('data-panel-state');
+    if (!el) return;
+
+    let live = 0;
+    let loading = 0;
+    let degraded = 0;
+    let failed = 0;
+
+    for (const layer of this.getAll()) {
+      if (!layer.showInTogglePanel || !this.isEnabled(layer.id)) continue;
+      switch (layerFeedState(layer.stats)) {
+        case 'unavailable': failed += 1; break;
+        case 'loading': loading += 1; break;
+        case 'degraded':
+        case 'stale':
+        case 'fallback': degraded += 1; break;
+        default: live += 1; break;
+      }
+    }
+
+    const enabled = live + loading + degraded + failed;
+    if (enabled === 0) {
+      el.dataset.state = 'idle';
+      el.textContent = 'Idle';
+      return;
+    }
+
+    const parts = [`${live + degraded + failed} live`];
+    if (loading) parts.push(`${loading} loading`);
+    if (degraded) parts.push(`${degraded} degraded`);
+    if (failed) parts.push(`${failed} failed`);
+
+    el.dataset.state = failed ? 'failed' : degraded ? 'degraded' : loading ? 'loading' : 'live';
+    el.textContent = parts.join(' · ');
+  }
+
   _refreshTogglePanel() {
+    // The header chip is outside the toggle container and must stay truthful
+    // even while the panel is collapsed and the rows below are not rendered.
+    this._syncPanelHeaderState();
     if (!this._toggleContainer) return;
     // Skip DOM churn while hidden; visibilitychange (main.js) triggers one
     // refresh on return. (perf wave 2)

@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { ensureGeoidReady } from './data/geoid.js';
 
-const MGRS_STUB_URL = 'gev-test-stub:mgrs';
+const MGRS_STUB_URL = 'r1-test-stub:mgrs';
 if (typeof nodeModule.registerHooks === 'function') {
   nodeModule.registerHooks({
     resolve(specifier, context, next) {

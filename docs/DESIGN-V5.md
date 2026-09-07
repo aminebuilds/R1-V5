@@ -1,10 +1,10 @@
-# God's Eye View — Design Spec V5
+# R.1 — Design Spec V5
 
 **Visual identity & interface specification**
 
 | | |
 |---|---|
-| **Status** | Draft · unbuilt |
+| **Status** | Phases 1–3 built · Phase 4 (the frame) outstanding |
 | **Date** | 2026-08-29 |
 | **Scope** | All HUD chrome |
 | **Excludes** | GLSL post-process styles (`src/styles/`), the globe itself |
@@ -189,7 +189,7 @@ wherever they carry the same meaning, so the 9,433-line stylesheet re-skins on t
 before any component work starts.
 
 ```css
-/* style.css — GEV V5 */
+/* style.css — R1 V5 */
 :root {
   color-scheme: dark;
 
@@ -519,6 +519,38 @@ npm run test:track
 ```
 
 `test:track` requires the dev server to be up. All three must stay green.
+
+### Built so far — 2026-09-06
+
+Phases 1–3 have landed against the live build. Phase 4 (§08, the fixed frame)
+has not: the HUD still uses the floating corner blocks and the draggable panel
+stack, so the "panels overlapping the scene" criterion below is untested.
+
+| Criterion | Target | Now |
+|---|---|---|
+| Distinct `border-radius` values | ≤ 3 (plus `50%`) | token-only (`--panel-radius`/`--btn-radius`/`--overlay-radius`, `0`, `50%`) |
+| `text-shadow` declarations | 0 | 0 |
+| `backdrop-filter` declarations | ≤ 4 | 0 |
+| `box-shadow` declarations | ≤ 8 | 6 |
+| Chromatic hues in chrome | 3, semantic | 3 (`--signal`/`--caution`/`--alert`); legacy `#00d4ff` and `#0a84ff` fully removed |
+| Uppercase letter-spacing values | 2 | 2 |
+
+Two changes went beyond a re-skin, because the audit found the chrome was
+carrying fiction rather than data:
+
+- **`src/hud.js` lost its invented sensor telemetry.** The classification
+  banners, the per-session pseudorandom `KH11-####` / `OPS-####` ids, the
+  orbital `ORB/PASS` line, the GSD/NIIRS sensor model, the MGRS grid, the
+  `BAND: PAN / BITS: 11 / LVL: 1A` edge strips and the blinking REC dot were
+  all decoration on a commercial-retail console. Measured readouts (UTC,
+  DMS coordinates, MSL altitude, sun elevation) stayed.
+- **The freed corner now renders `getViewHealth()`** from
+  `portfolio/healthRollup.js` — the rollup that until now only the voice
+  assistant could reach — with its `coverage` denominator printed beside it,
+  so a mean over 2 of 11 sites can never be misread as the portfolio.
+
+Phase 4 remains the largest outstanding item and is unchanged from the plan
+above.
 
 ### Acceptance — V5 is done when
 

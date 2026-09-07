@@ -7,16 +7,16 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
 const radio = readFileSync(new URL('./data/radio.js', import.meta.url), 'utf8');
 const rocketLaunches = readFileSync(new URL('./data/rocketLaunches.js', import.meta.url), 'utf8');
-const realtime = readFileSync(new URL('./voice/gevRealtime.js', import.meta.url), 'utf8');
+const realtime = readFileSync(new URL('./voice/r1Realtime.js', import.meta.url), 'utf8');
 const voice = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 
 /** Parse the Realtime tool array out of the Vite config as real data. */
 function realtimeTools() {
-  const start = voice.indexOf('const GEV_REALTIME_TOOLS = [');
+  const start = voice.indexOf('const R1_REALTIME_TOOLS = [');
   const end = voice.indexOf('\n];', start);
   assert.ok(start >= 0 && end > start, 'Realtime tool schema block is missing');
-  const literal = voice.slice(start + 'const GEV_REALTIME_TOOLS = '.length, end + 2);
+  const literal = voice.slice(start + 'const R1_REALTIME_TOOLS = '.length, end + 2);
   // The block is pure data; evaluating it beats regexing nested schemas.
   return new Function(`return ${literal};`)();
 }
@@ -170,6 +170,10 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   // If this fails and the change was deliberate, re-derive the digest and say
   // in the mic-test brief which tools moved — the session cache busts on any
   // schema change.
+  //
+  // Last re-derived for the R.1 rename: every tool description carrying the old
+  // product name was rewritten. No tool was added, removed, or given different
+  // parameters, so the 21-tool inventory below is unchanged.
   const TOUCHED = new Set([
     'set_context_mode',
     'control_cockpit',
@@ -200,27 +204,27 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     .update(JSON.stringify(unchanged))
     .digest('hex')
     .slice(0, 16);
-  assert.equal(digest, '802ed694b8887b88', 'an unchanged Realtime tool definition drifted');
+  assert.equal(digest, 'b499e61cefdeaa88', 'an unchanged Realtime tool definition drifted');
 });
 
 test('Radio volume and mission speed share the Sharpen slider visual language', () => {
   for (const id of ['cockpit-radio-volume', 'context-radio-mini-volume', 'radio-volume']) {
     assert.match(
       html,
-      new RegExp(`id="${id}"[^>]*class="gev-quantitative-slider"[^>]*type="range"`),
+      new RegExp(`id="${id}"[^>]*class="r1-quantitative-slider"[^>]*type="range"`),
     );
   }
   assert.match(
     rocketLaunches,
-    /id="space-mission-replay-speed" class="gev-quantitative-slider" type="range" min="0\.25" max="4" step="0\.25" value="1"/,
+    /id="space-mission-replay-speed" class="r1-quantitative-slider" type="range" min="0\.25" max="4" step="0\.25" value="1"/,
   );
-  assert.match(rocketLaunches, /class="gev-slider-value"[^>]*data-mission-replay-speed-output/);
-  assert.match(css, /\.gev-quantitative-slider\s*\{[\s\S]*?min-width: 0;[\s\S]*?height: 18px;/);
-  assert.match(css, /\.gev-quantitative-slider::-webkit-slider-runnable-track\s*\{[\s\S]*?height: 3px;[\s\S]*?background: rgba\(255, 255, 255, 0\.08\);/);
-  assert.match(css, /\.gev-quantitative-slider::-webkit-slider-thumb\s*\{[\s\S]*?width: 10px;[\s\S]*?height: 10px;[\s\S]*?border-radius: 50%;[\s\S]*?background: var\(--accent\);/);
-  assert.match(css, /\.gev-quantitative-slider:focus-visible\s*\{[\s\S]*?outline: 1px solid/);
-  assert.match(css, /\.gev-quantitative-slider:disabled\s*\{[\s\S]*?opacity: \.42;[\s\S]*?cursor: not-allowed;/);
-  assert.match(css, /\.gev-slider-value\s*\{[\s\S]*?color: var\(--accent\);[\s\S]*?font-size: 9px;/);
+  assert.match(rocketLaunches, /class="r1-slider-value"[^>]*data-mission-replay-speed-output/);
+  assert.match(css, /\.r1-quantitative-slider\s*\{[\s\S]*?min-width: 0;[\s\S]*?height: 18px;/);
+  assert.match(css, /\.r1-quantitative-slider::-webkit-slider-runnable-track\s*\{[\s\S]*?height: 3px;[\s\S]*?background: rgba\(255, 255, 255, 0\.08\);/);
+  assert.match(css, /\.r1-quantitative-slider::-webkit-slider-thumb\s*\{[\s\S]*?width: 10px;[\s\S]*?height: 10px;[\s\S]*?border-radius: 50%;[\s\S]*?background: var\(--accent\);/);
+  assert.match(css, /\.r1-quantitative-slider:focus-visible\s*\{[\s\S]*?outline: 1px solid/);
+  assert.match(css, /\.r1-quantitative-slider:disabled\s*\{[\s\S]*?opacity: \.42;[\s\S]*?cursor: not-allowed;/);
+  assert.match(css, /\.r1-slider-value\s*\{[\s\S]*?color: var\(--accent\);[\s\S]*?font-size: 9px;/);
   assert.doesNotMatch(css, /#space-mission-panel \[data-mission-replay-speed\]::-webkit-slider-thumb/);
 });
 

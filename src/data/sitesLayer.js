@@ -18,7 +18,7 @@ import {
 } from '../portfolio/competitiveHeatmap.js';
 
 /**
- * @file The Banner OS "Portfolio Sites" data layer — Phase 0 of the Banner OS
+ * @file The R.1 "Portfolio Sites" data layer — Phase 0 of the R.1
  * spec. Displays user-imported and dynamically discovered commercial networks,
  * integrates live traffic congestion, and hosts the multi-mode Competitive &
  * Traffic Radiant Heatmaps.

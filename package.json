@@ -1,35 +1,37 @@
 {
-  "name": "gods-eye-view-world",
+  "name": "r1-v5",
   "private": true,
   "version": "0.1.0",
-  "description": "A real-time intelligence console for planet Earth — photorealistic 3D globe, live aircraft/ships/satellites/earthquakes/CCTV, and hands-free voice control. Runs in a browser.",
+  "description": "R.1 — Commercial Intelligence: a decision console for multi-site operators. Business name to site network on a photorealistic 3D globe, live traffic/competitive/price overlays, and view-grounded answers by click or voice.",
   "type": "module",
   "license": "MIT",
   "author": "Amine (aminebuilds)",
   "contributors": [
-    "Bilawal Sidhu <https://github.com/bilawalsidhu/gods-eye-view> (original creator)"
+    "Bilawal Sidhu <https://github.com/bilawalsidhu> (author of the God's Eye View globe substrate R.1 forked)"
   ],
-  "homepage": "https://github.com/aminebuilds/gods-eye-view-world#readme",
+  "homepage": "https://github.com/aminebuilds/R1-V5#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aminebuilds/gods-eye-view-world.git"
+    "url": "https://github.com/aminebuilds/R1-V5.git"
   },
   "bugs": {
-    "url": "https://github.com/aminebuilds/gods-eye-view-world/issues"
+    "url": "https://github.com/aminebuilds/R1-V5/issues"
   },
   "engines": {
     "node": ">=24.14.0 <25 || >=26 <27"
   },
   "keywords": [
+    "commercial-intelligence",
+    "operator-console",
+    "retail-intelligence",
+    "fuel-convenience",
+    "site-selection",
+    "geospatial",
     "cesium",
     "3d-globe",
-    "geospatial",
-    "osint",
-    "spatial-intelligence",
     "photorealistic-3d-tiles",
-    "adsb",
-    "ais",
-    "satellites",
+    "traffic",
+    "competitive-analysis",
     "voice-control",
     "openai-realtime",
     "visualization"

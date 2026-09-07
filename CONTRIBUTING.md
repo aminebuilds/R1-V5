@@ -1,21 +1,21 @@
-# Contributing to God's Eye View
+# Contributing to R.1
 
-Thanks for being here. God's Eye View is an open foundation for live spatial intelligence in the browser, and it gets better when more people run it, break it, and extend it.
+Thanks for being here. R.1 is a decision console for multi-site operators, built on an open, live-world 3D substrate — and it gets better when more people run it, break it, and extend it.
 
 ## Getting set up
 
 Use Node.js 24.14.x or 26.x (also enforced by `package.json`).
 
 ```bash
-git clone https://github.com/aminebuilds/gods-eye-view-world.git
-cd gods-eye-view-world
+git clone https://github.com/aminebuilds/R1-V5.git
+cd R1-V5
 nvm install 24.14.0
 nvm use 24.14.0
 npm install
 ./scripts/dev-fresh.sh        # or: GOOGLE_MAPS_API_KEY="…" npm run dev
 ```
 
-You need a **Google Maps API key** with the Map Tiles API enabled (see the [README](README.md#-api-keys)). Most data layers work with no other accounts. On macOS the launcher pulls keys from the Keychain; on any platform you can pass them as env vars or use a `.env` (copy `.env.example`).
+You need a **Google Maps API key** with the Map Tiles API enabled (see the [README](README.md#-keys--costs)). Most data layers work with no other accounts. On macOS the launcher pulls keys from the Keychain; on any platform you can pass them as env vars or use a `.env` (copy `.env.example`).
 
 Open `http://localhost:4173`. Before sending a PR run `npm run build`, `npm test`, and `npm run test:track` (dev server must be up) — **all three must stay green.**
 
@@ -25,8 +25,10 @@ The highest-leverage places to jump in:
 
 - **🌆 Add a CCTV source pack.** Austin is the reference camera source. Adding another city means a clean public camera catalog with coordinates, attribution, and server-registered frame URLs (the proxy only fetches registered URLs — never client-supplied ones, see [SECURITY.md](SECURITY.md)). City packs are the best first lane.
 - **🛰️ Add or improve a data layer.** Each layer is one self-contained module in `src/data/<layer>.js` implementing the layer interface (`init/enable/disable/update/destroy/getStats`, optional `getDetectableObjects`/`getStats`). Use an existing layer as a template.
-- **🎙️ Extend voice control.** Voice tools are declared server-side (`GEV_REALTIME_TOOLS` in `vite.config.js`) and executed client-side (`src/voice/gevActions.js`). Keep the tool surface tight and the responses honest (confirm only what actually happened).
+- **🎙️ Extend voice control.** Voice tools are declared server-side (`R1_REALTIME_TOOLS` in `vite.config.js`) and executed client-side (`src/voice/r1Actions.js`). Keep the tool surface tight and the responses honest (confirm only what actually happened).
 - **🎨 Add a visual style.** Styles are GLSL post-process shaders in `src/styles/`.
+- **📈 Extend a commercial engine.** Everything in `src/portfolio/` is a plain async function with a typed return — competitor analysis, traffic delays, the gap model, fuel price. Read [docs/RETAIL-FUEL-INTELLIGENCE.md](docs/RETAIL-FUEL-INTELLIGENCE.md) first; it is binding for that folder.
+- **🔭 Deepen an industry lens.** `src/ontology/industryOntology.js` defines each lens. Fuel & convenience is the one built out; the rest are waiting for a spec.
 - **🐛 Fix bugs / improve the first-run experience.** See [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
 
 ## Architecture in one minute
@@ -53,6 +55,8 @@ The highest-leverage places to jump in:
 
 ## Ground rules
 
+- **Every figure declares whether it is measured, modelled, or unavailable.** There is no fourth category. Do not add a synthetic fallback to any commercial path — if no honest source exists, return an explicit empty state (`no-key`, `no-competitors-found`) and say why. A PR that makes an invented number look measured will not be merged.
+- **Voice is never load-bearing.** A new capability must be reachable from a button or URL parameter before it gets a voice tool.
 - This is a tool for **public** data. Don't add scraping of sources whose terms forbid it, private/paywalled datasets, or anything that misrepresents public-data inference as authoritative intelligence.
 - Be decent to each other. Assume good faith, keep it constructive.
 

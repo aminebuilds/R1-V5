@@ -1,7 +1,7 @@
 /**
  * @file Search a business/brand name near a location and turn the matching
  * Google Places results directly into `Site` records — an alternative,
- * lighter path into the portfolio than CSV import (§07 "Ask" of the Banner OS
+ * lighter path into the portfolio than CSV import (§07 "Ask" of the R.1
  * spec calls for natural-language discovery; this is the site-acquisition
  * half of that).
  *

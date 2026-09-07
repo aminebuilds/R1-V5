@@ -2,7 +2,7 @@
  * @file The Phase-0 `Site` record shape and pure normalization helpers for
  * turning a raw CSV row into a `Site`, or flagging why it can't become one.
  * `Org`/`Banner`/`Region` are constant-id stubs on every `Site` in Phase 0
- * (see docs/CURRENT-STATE.md-adjacent Banner OS spec, §04) rather than
+ * (see docs/CURRENT-STATE.md-adjacent R.1 spec, §04) rather than
  * separate entity tables — a later phase can split them without reshaping
  * `Site`.
  * @module portfolio/siteModel

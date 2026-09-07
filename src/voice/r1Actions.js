@@ -31,6 +31,7 @@ import { describeModel } from '../portfolio/fuelPriceModel.js';
 import { CHOKEPOINTS, countTankersInGate } from '../portfolio/disruptionIndex.js';
 import { fetchRegionalBrief, weatherCodeLabel } from '../data/regionalBrief.js';
 import sitesLayer from '../data/sitesLayer.js';
+import { publishActionResult } from '../explain/bus.js';
 
 const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
 const PANEL_ALIASES = new Map([
@@ -294,10 +295,57 @@ export function readLayerLifecycleSummary(dataManager, layerId, { fallbackEnable
   };
 }
 
-export function createGevActionRunner({ viewer, styleManager, dataManager, sceneDirector = null, annotations = null }) {
+/**
+ * The one runner every surface shares.
+ *
+ * `createR1ActionRunner` installs the view-target prewarm and the camera
+ * verbs, so calling it twice would double-install them. Voice was the only
+ * caller until the explain board arrived; now the typed ask box needs the same
+ * capabilities, and both must drive one instance regardless of which
+ * initialises first.
+ *
+ * The wrapper also announces every result on the explain bus. That is a
+ * one-way publish into `src/explain/` — nothing there is imported here — so an
+ * action still executes normally when no board is mounted.
+ *
+ * @type {Function|null}
+ */
+let _sharedActionRunner = null;
+
+/**
+ * Get the shared runner, creating it on first call.
+ * @param {{viewer: object, styleManager: object, dataManager: object, sceneDirector?: object|null, annotations?: object|null}} deps
+ * @returns {(name: string, args?: object, options?: object) => Promise<object>}
+ */
+export function ensureActionRunner(deps) {
+  if (_sharedActionRunner) return _sharedActionRunner;
+  const run = createR1ActionRunner(deps);
+  _sharedActionRunner = async function runSharedAction(name, args = {}, options = {}) {
+    const result = await run(name, args, options);
+    publishActionResult(name, result, { origin: options?.origin || 'voice' });
+    return result;
+  };
+  return _sharedActionRunner;
+}
+
+/**
+ * The shared runner if one has been created, else null. Surfaces that must not
+ * force initialisation (a panel button, say) use this and degrade quietly.
+ * @returns {Function|null}
+ */
+export function getActionRunner() {
+  return _sharedActionRunner;
+}
+
+/** Test hook: forget the shared runner. */
+export function resetActionRunner() {
+  _sharedActionRunner = null;
+}
+
+export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneDirector = null, annotations = null }) {
   installViewTargetPrewarm(viewer);
   initCameraVerbs(viewer, getViewTargetCartesian);
-  return async function runGevAction(name, rawArgs = {}, runOptions = {}) {
+  return async function runR1Action(name, rawArgs = {}, runOptions = {}) {
     const args = rawArgs && typeof rawArgs === 'object' ? rawArgs : {};
     const current = () => !runOptions.signal?.aborted
       && (typeof runOptions.isCurrent !== 'function' || runOptions.isCurrent());
@@ -456,7 +504,7 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
           longitude: Number(args.longitude),
         } : {}),
       };
-      const layer = await runGevAction('set_layer_visibility', {
+      const layer = await runR1Action('set_layer_visibility', {
         layerId,
         enabled: true,
       }, runOptions);
@@ -471,7 +519,7 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
         };
       }
 
-      const location = await runGevAction('fly_to_location', locationArgs, runOptions);
+      const location = await runR1Action('fly_to_location', locationArgs, runOptions);
       if (location?.ok !== true || !current()) {
         return {
           ok: false,
@@ -1149,7 +1197,7 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
       const enabled = args.enabled !== undefined ? Boolean(args.enabled) : true;
       if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
         try {
-          window.dispatchEvent(new CustomEvent('gev:cockpit-weather-toggle', {
+          window.dispatchEvent(new CustomEvent('r1:cockpit-weather-toggle', {
             detail: { enabled },
           }));
         } catch {}
@@ -1162,7 +1210,7 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
       };
     }
 
-    throw new Error(`Unknown GEV tool: ${name}`);
+    throw new Error(`Unknown R1 tool: ${name}`);
   };
 }
 
@@ -2186,8 +2234,8 @@ export async function getBasemapLabelContext(viewer) {
 }
 
 function installViewTargetPrewarm(viewer) {
-  if (viewer.__gevViewTargetPrewarmInstalled) return;
-  viewer.__gevViewTargetPrewarmInstalled = true;
+  if (viewer.__r1ViewTargetPrewarmInstalled) return;
+  viewer.__r1ViewTargetPrewarmInstalled = true;
   let timer = null;
   let reportedPrewarmFailure = false;
   viewer.camera.moveEnd.addEventListener(() => {
@@ -2427,10 +2475,10 @@ function focusDataLayerRow(layerId) {
   const row = document.querySelector(`#data-toggles [data-layer-id="${CSS.escape(layerId)}"]`);
   if (!row) return null;
   row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  row.classList.remove('gev-voice-focus');
+  row.classList.remove('r1-voice-focus');
   void row.offsetWidth;
-  row.classList.add('gev-voice-focus');
-  window.setTimeout(() => row.classList.remove('gev-voice-focus'), 3000);
+  row.classList.add('r1-voice-focus');
+  window.setTimeout(() => row.classList.remove('r1-voice-focus'), 3000);
   const name = row.querySelector('.data-name')?.textContent?.trim() || layerId;
   return { id: layerId, name };
 }
@@ -2883,7 +2931,7 @@ async function getBasemapContext(viewer, viewTarget = null) {
     );
     return {
       source: 'Google Photorealistic 3D Tiles / Cesium basemap',
-      hasGoogle3DTiles: Boolean(window.__godsEyeView?.tileset),
+      hasGoogle3DTiles: Boolean(window.__r1?.tileset),
       viewScale,
       viewportSamples: samples,
       viewportPlaces,
@@ -2919,7 +2967,7 @@ async function getBasemapContext(viewer, viewTarget = null) {
   const nearbyPlaces = resolvedNearbyPlaces || [];
   return {
     source: 'Google Photorealistic 3D Tiles / Cesium basemap',
-    hasGoogle3DTiles: Boolean(window.__godsEyeView?.tileset),
+    hasGoogle3DTiles: Boolean(window.__r1?.tileset),
     viewScale,
     viewportSamples: samples,
     viewportPlaces,
@@ -3385,7 +3433,7 @@ function approximateCoordinateDistanceSq(latA, lonA, latB, lonB) {
 function logSlowContext(startedAt, scope) {
   const durationMs = Math.round(performance.now() - startedAt);
   if (durationMs >= 500) {
-    console.info(`[GEV Voice] ${scope} scene context completed in ${durationMs}ms`);
+    console.info(`[R1 Voice] ${scope} scene context completed in ${durationMs}ms`);
   }
 }
 
@@ -3403,9 +3451,9 @@ function dominantValue(values) {
 
 function summarizeEntity(viewer, entity, { includeProperties = false } = {}) {
   const now = Cesium.JulianDate.now();
-  if (entity.__gevContextId) {
-    const store = window.__gevContextStore;
-    const record = store?.entities?.get(entity.__gevContextId);
+  if (entity.__r1ContextId) {
+    const store = window.__r1ContextStore;
+    const record = store?.entities?.get(entity.__r1ContextId);
     if (record) return summarizeContextRecord(record, { includeProperties });
   }
   const props = propertyObject(entity);

@@ -584,14 +584,14 @@ function windowThatFailsOnce() {
   let store;
   return {
     dispatchEvent() {},
-    get __gevContextStore() {
+    get __r1ContextStore() {
       if (armed) {
         armed = false;
         throw new Error('post-processing failed');
       }
       return store;
     },
-    set __gevContextStore(value) { store = value; },
+    set __r1ContextStore(value) { store = value; },
   };
 }
 

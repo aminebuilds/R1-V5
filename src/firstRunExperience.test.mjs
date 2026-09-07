@@ -626,20 +626,22 @@ test('the DISPLAY rail starts collapsed on a first run, and a stored choice wins
 
 test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is instructions only', () => {
   const src = fs.readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
-  const start = src.indexOf('const GEV_REALTIME_TOOLS = [');
-  assert.ok(start > 0, 'GEV_REALTIME_TOOLS must still be a single literal array');
+  const start = src.indexOf('const R1_REALTIME_TOOLS = [');
+  assert.ok(start > 0, 'R1_REALTIME_TOOLS must still be a single literal array');
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  // Baseline re-derived once, deliberately, when the retail build added
+  // Baseline re-derived deliberately, twice. First when the retail build added
   // get_view_health / get_portfolio_health and rewrote the cool-off tool
-  // description. That was a separate feature, NOT the mission mapping — the
-  // rule this test exists to protect (missions ride existing tools and never
-  // touch the schema) is unchanged, and this pin is what still enforces it.
-  assert.equal(block.length, 41479, 'tool schema byte length drifted from the baseline');
+  // description; then again for the R.1 rename, which shortened tool
+  // descriptions without adding, removing, or re-parameterizing a single tool.
+  // Both were separate changes, NOT the mission mapping — the rule this test
+  // exists to protect (missions ride existing tools and never touch the schema)
+  // is unchanged, and this pin is what still enforces it.
+  assert.equal(block.length, 41430, 'tool schema byte length drifted from the baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'b054202783b8cf82915461835f661b9741d981a30453137d28555dad69156374',
+    'b19a3366f7131c4ec212fa1be47f7709f2ef9a37ad5ba31a68cd708dfe05e0d3',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

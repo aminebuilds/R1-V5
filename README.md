@@ -1,22 +1,13 @@
 <div align="center">
 
-# 🌐 God's Eye View
+# R.1
 
-### A spy-satellite simulator in your browser — then you realize the sources are public and the data is real.
+### Commercial Intelligence
 
-Photorealistic 3D globe. Live aircraft, ships, satellites, earthquakes, traffic, and public cameras, with clearly labeled modeled views where a live feed is unavailable. Hands-free voice control powered by a realtime AI agent.
+**A decision console for people who operate physical sites.**
+Type a business name, watch its network land on a photorealistic 3D globe, and ask the world what it is doing to your revenue.
 
-*No place left behind.*
-
-![Orbital HUD, a tracked live globe, FLIR terrain — then OPEN SOURCED](docs/media/hero-open-source-reveal.gif)
-
-<a href="https://www.youtube.com/@bilawalsidhu">
-  <img src="docs/media/youtube-popular-videos.png" alt="The God's Eye View video series on YouTube" width="100%">
-</a>
-
-▶️ **From the project behind the viral God's Eye View series** *(formerly WorldView)* — [5M+ on YouTube](https://youtube.com/playlist?list=PL6qSg2I-7_koPbDnSMo0QeeHX_RknA2uv&si=nBGYMoHWQw41v93Q)
-
-🍴 Originally created and open-sourced by [Bilawal Sidhu](https://github.com/bilawalsidhu/gods-eye-view) — this repository is [Amine](https://github.com/aminebuilds)'s actively maintained fork and build.
+*Every number declares whether it was measured, modelled, or unavailable.*
 
 </div>
 
@@ -24,356 +15,279 @@ Photorealistic 3D globe. Live aircraft, ships, satellites, earthquakes, traffic,
 
 <div align="center">
 
-**[Quick Start](#-quick-start) · [First Five Minutes](#-the-first-five-minutes) · [Talk to It](#-talk-to-it) · [What's Live](#-whats-on-the-globe) · [Under the Hood](#-under-the-hood) · [Keys](#-api-keys) · [Costs](#-what-it-actually-costs)**
+**[Quick Start](#-quick-start) · [The Flow](#-the-flow) · [Lenses](#-industry-lenses) · [Fuel & Convenience](#-fuel--convenience--the-built-vertical) · [Layers](#%EF%B8%8F-whats-on-the-globe) · [Voice](#-ask-it) · [Keys](#-keys--costs) · [Docs](#-documentation)**
 
 </div>
 
 ---
 
-## 🌍 Why This Exists
+## 🎯 What This Is
 
-**You asked, so it's happening.** God's Eye View is open source. Track the world live. Talk to it. Break it. Extend it.
+R.1 is an operator's console, not a map toy.
 
-Most open-source intelligence is a pile of browser tabs. The signals are abundant, but the *interface* is the bottleneck. God's Eye View turns those signals into a **place**: the world is already broadcasting — flight transponders, ship beacons, orbital elements, seismographs, public cameras — and this makes it visible on a photorealistic 3D Earth in real time. No classified clearance required; it's public signal all the way down, and the interface runs in your browser, under your control.
+The premise: an operator of physical sites — fuel and convenience stores first — has exactly one question that matters on any given morning. *Where is money leaking, and what do I do about it in the next hour?* Answering that needs live context about the world immediately around each site: congestion, closures, weather, competitors, prices, regional news. All of that exists as public signal. None of it is assembled anywhere an operator can act on.
 
-> Half the magic is that it looks like a forbidden cockpit. The other half is that every line of code is inspectable.
+R.1 assembles it. The globe is not the product — it is the surface where a modelled answer becomes **checkable** against something you can see with your own eyes.
 
-The live layers are grounded in public feeds: the airliner crossing your screen is reporting telemetry, the camera is installed at a published location, and the ISS position is propagated from current orbital elements. The client deliberately renders flights one polling interval behind real time so it can interpolate smoothly. Some experiences are modeled rather than live: keyless traffic is labeled as a simulation, camera poses are estimated until calibrated, and launch ascent playback is marked `RECONSTRUCTED ESTIMATE`. Each layer keeps its source and freshness state visible, including partial, delayed, simulated, and unavailable states.
-
----
-
-## 🎛️ What This Thing Does
-
-<div align="center">
-
-[![YouTube video about the God's Eye View open source release](https://img.youtube.com/vi/GRJaKcXZS94/maxresdefault.jpg)](https://www.youtube.com/watch?v=GRJaKcXZS94)
-
-▶️ **[The full walkthrough of everything below, on YouTube](https://www.youtube.com/watch?v=GRJaKcXZS94)**
-
-</div>
-
-- **🛩️ Cockpit view:** Ride inside a tracked flight — the camera holds the terrain under you all the way down.
-- **📡 Contacts:** A 250 km roster of everything near your target — step through live aircraft and drop into any cockpit.
-- **🎯 Click-to-track anything:** Camera locks on, draws a fading trail, surfaces full metadata — and a tracked fire or vessel hands you off to the nearest live camera in one click.
-- **🖊️ Voice whiteboard:** Speak annotations onto the world — real boundary polygons, marks, and routes.
-- **🛫 3D hangar:** Real per-class aircraft models — 787, ATR-72, Citation, Bell 206, MQ-9 — and a tracked contact swaps from glyph to 3D model as you close in.
-- **🎨 Reskin reality:** GLSL sensor looks over the normal globe — CRT, NVG, FLIR/thermal, Noir, Snow.
-- **🟩 Detection overlay:** Screen-space bounding boxes and IDs on everything in view.
-- **🎖️ Military HUD:** Tactical heads-up display with intelligence-style telemetry.
-- **🌐 Global Context:** Stage the full situational picture with one switch — and get your exact view back when you leave.
-- **🎥 Scene director:** Capture cinematic camera tours for clips and demos.
-- **🔗 Share Links:** Camera, style, layers, and even one tracked target serialize into a URL — a live target is a handoff, not a bookmark.
-- **🏠 Reset Globe:** One control — or one sentence — back to the full Earth.
+> ### The rule that shapes everything
+>
+> Every figure on screen carries its epistemic status. **Measured** means a real feed said so. **Modelled** means R.1 inferred it and will tell you from what. **Unavailable** means no honest source exists and the field stays empty.
+>
+> There is no fourth category. A fabricated gallon count that looks like a real one destroys the only thing this product sells, so synthetic fallbacks were removed from every commercial path rather than dressed up. An empty competitor search returns `no-competitors-found`; it does not invent competitors. The gap model reports a dollar figure only when given operator actuals — otherwise it ranks on measured demand potential and says so.
 
 ---
 
 ## ⚡ Quick Start
 
-Requires Node.js 24.14.x or 26.x (enforced by `package.json`).
+Requires **Node.js 24.14.x or 26.x** (enforced by `package.json` `engines`).
 
 1. Copy `.env.example` → `.env` and set `GOOGLE_MAPS_API_KEY`.
 2. Install and run:
 
 ```bash
 npm install
-npm run dev -- --host localhost --port 4173
+npm run dev
 ```
 
-3. Open **`http://localhost:4173`**. Cold start settles in under two seconds on a recent laptop (median 1.86 s in a point-in-time M5/Chrome capture — [docs/PERFORMANCE.md](docs/PERFORMANCE.md); a comparison baseline, not a hardware requirement). A first-run card offers to stage a mission for you — **Live Contacts**, **Space Missions**, **Environmental** — or leaves you to explore manually.
+3. Open **`http://localhost:4173`**.
 
-> [!TIP]
-> **Not a coder? Have an AI do this whole page for you.** A one-click installer is in the works — until then, install a coding agent ([Claude Code](https://claude.com/claude-code), [Codex](https://openai.com/codex/), [Cursor](https://cursor.com), or [Antigravity](https://antigravity.google)) and paste this:
->
-> ```text
-> Clone https://github.com/aminebuilds/gods-eye-view-world and set it up on my machine.
-> Install everything it needs, walk me through getting the required Google Maps API
-> key step by step (plus any optional free keys I want), put the keys in .env, and
-> help me set a billing alert and a usage quota on the Google key so I can't
-> overspend. Then start the dev server and open it in my browser. I'm not a
-> developer — explain what you're doing as you go, and ask me before any step
-> that could cost money.
-> ```
+That one key is the entry fee — it buys the photorealistic planet. Every other layer degrades gracefully without its key: traffic falls back to a clearly labeled simulation, fire detection reports `KEY REQUIRED`, voice control stays off, fuel pricing reports `no-key`. Nothing silently invents data to fill a gap.
 
-**That one key is the whole entry fee.** Everything in this README is color-coded — 🟢 needs nothing · 🟡 free key · 🔴 metered — and Google Maps is the only 🔴 you need: it buys the photorealistic planet, and most of the globe lights up 🟢 from there. For typical solo exploring, expect **$0 on most layers** and pocket change on the metered two: Google currently gives **1,000 free 3D-tile sessions a month** — each good for up to three hours of rendering, which is very hard for one person to exhaust — and voice carries a built-in $5 session cap. Full map in [Keys & Costs](#-api-keys), full honest breakdown in [What it actually costs](#-what-it-actually-costs).
-
-The dev server binds to **localhost** — your keys stay on your machine. Sharing on a LAN safely is covered in [Sharing an instance](#-sharing-an-instance) and [SECURITY.md](SECURITY.md).
-
-**macOS shortcut:** `./scripts/dev-fresh.sh` clears the Vite cache and pulls your keys straight from the Keychain.
+The dev server binds to **localhost**, so your keys stay on your machine. Read [Running it somewhere else](#-running-it-somewhere-else) before exposing it.
 
 ---
 
-## 🕐 The First Five Minutes
+## 🔄 The Flow
 
-No account, no signup. The first-run card will offer to stage a mission for you — or run this gauntlet yourself. Somewhere in these five minutes it stops feeling like a demo:
+The user types a business name. Everything else follows from that one input.
 
-1. **Light up the sky.** Take the **Live Contacts** mission (or turn on **Flights** yourself) — thousands of live aircraft, gliding on real telemetry, detection mesh already reading the scene. Click one: the camera locks on, a trail draws behind it, and its live telemetry card comes up.
-2. **Take the controls.** Hit **COCKPIT** on your tracked plane and ride it down, switching sensors mid-flight: NVG into Ironbow FLIR. The cockpit carries its own briefing strip — nearby live signals, regional headlines, and real local weather, with an opt-in **WX** mode that renders volumetric clouds from actual observations around your aircraft — and **Contacts** keeps the 250 km roster one click (or one sentence) away: jump plane to plane and fall straight into the next cockpit.
+```
+"Casey's"  →  site discovery  →  network on globe  →  live overlays  →  ask
+   │              │                    │                   │             │
+   │         Places + OSM         sites layer         traffic flow   view-grounded
+   │         ~40 sites/metro      one dot per site    fuel price     answers over
+   │                              live health         competitors    what's rendered
+   └── no agent required — this is a workflow calling APIs
+```
 
-![Riding with a live aircraft in cockpit view while switching sensor modes](docs/media/06-cockpit-ar.gif)
+**The design rule that matters:** every capability is a plain async function with a typed return, callable from a button, a URL parameter, or a voice tool. Voice sits on top of that surface. It is never load-bearing. **If the mic is off, the product still works.**
 
-![Jumping between live aircraft and falling straight into a cockpit view](docs/media/12-switch-aircraft-cockpit.gif)
+You can also skip discovery entirely and import your own portfolio as CSV.
 
-3. **Drop into a busy airport.** Search one and descend to the taxiways with **3D** aircraft on — grounded contacts, taxi trails, the whole apron working in real time.
-
-![Moving from a full airport overhead down to close taxiway inspection with 3D flight models](docs/media/start-here/airport-ground-traffic-google-3d.gif)
-
-4. **Look through a public camera.** Turn on **CCTV** over Austin, London, or California. The feeds aren't webcam embeds — they project *into* the 3D city. Cycle coverage to **VIEWSHED** and every camera draws its estimated coverage volume — where it reaches, and where it goes blind.
-
-![Diving into an Austin intersection with a live public camera projected into the 3D scene](docs/media/03-austin-cctv.gif)
-
-5. **Paint the streets with rush hour.** Turn on **Traffic** and dive below ~8 km — per-vehicle flow colors to the real jams (with a TomTom key; keyless it's a labeled simulation). Then hit **NEAREST** in the CCTV panel and watch the jam through the camera pointed at it.
-
-![Diving from city-scale live congestion straight into an intersection's public camera](docs/media/05-traffic-to-cctv.gif)
-
-6. **Track something in orbit.** Turn on **Satellites** and click the ISS — you ride along at orbital distance, orbit ring and all.
-
-![Tracking the ISS along its orbital path as it crosses over Ukraine](docs/media/14-iss-over-ukraine.gif)
-
-7. **Switch the optics.** Tap `1`–`7` — CRT, NVG, FLIR — and the whole live planet re-renders through a different sensor.
-
-![Cycling a dense live globe through CRT, FLIR, and NVG in one continuous view](docs/media/01-style-sweep.gif)
-
-8. **Talk to it** *(needs an OpenAI key)*: *"Take me to LAX and select the nearest airborne aircraft."*
-9. **Come home.** Hit **Reset Globe** — or just say *"zoom out to a globe view."*
-
-**Keyboard:** `1`–`7` visual styles · `H` HUD · `D` detection · `C` cockpit · `Esc` out.
+<!-- CAPTURE: business name typed → sites landing on the globe → a site card opening -->
 
 ---
 
-## 🎙️ Talk to It
+## 🔭 Industry Lenses
 
-> Voice needs an **OpenAI key**. Without one the entire app still runs — the mic button just reports voice is unavailable. The same key drives the **AI HUD summary**: a terse, five-word intelligence-style readout of the current view that regenerates as you move.
+A lens re-weights which layers, entities, and questions matter. Fuel & convenience is built out; the others select the relevant globe layers and ontology today, and deepen as each vertical gets specified.
 
-Click **GEV MIC**, grant the microphone, and just talk. This is more than a voice-controlled remote:
+| | Lens | | Lens |
+|---|---|---|---|
+| ⛽ | **Fuel & Convenience** *(built)* | 🏭 | Energy & Utilities |
+| 🚙 | Automotive & EV Mobility | 👕 | Apparel & Fashion |
+| ✈️ | Airlines & Aviation | 🌾 | Agriculture & Commodities |
+| 🚢 | Maritime & Shipping | 🏦 | Banking & Financial Services |
+| 🖥️ | Datacenters & Cloud | 🏗️ | Construction & Heavy |
+| 🚀 | Space & Aerospace | 🩺 | Clinical Trials & Healthcare |
 
-- **🧠 It knows what it's looking at.** The agent pulls live scene context before answering — including coordinates, street names, active layers, and view scale. Ask *"what city is this?"* mid-flight and it knows.
-- **🎯 Entity Q&A.** Click any plane, ship, or datacenter and ask *"what's this?"* It answers using the object's live telemetry.
-- **👁️ Visual grounding.** At street level, it reads a viewport screenshot to identify legible signage and building names, and is instructed never to hallucinate labels.
-- **🎬 Cinematic framing.** *"Show me the planes overhead"* pulls the camera back, angles it, and frames the live traffic like a director.
-- **🔒 Honest and secure.** The agent only confirms actions that succeeded. Your `OPENAI_API_KEY` never touches the browser; the client only gets a short-lived session token.
+Ontology lives in [`src/ontology/industryOntology.js`](src/ontology/industryOntology.js).
 
-Twenty-eight tools, four jobs — the commands below come straight from the product's voice test suite and tool playbook:
+---
 
-**🎥 Direct it** — drone-operator camera verbs:
-> 🗣️ *"Take me to Tokyo."* · *"Orbit around this area slowly."* · *"Draw the walking route from the Capitol to Zilker Park."* → *"Fly the route we just drew."* · *"Zoom out to a globe view."*
+## ⛽ Fuel & Convenience — the built vertical
 
-**🖊️ Annotate it** — a whiteboard over the real world:
-> 🗣️ *"Outline the state of Texas."* · *"Annotate the Texas State Capitol and its grounds"* — it draws the **actual enclosing boundary**, not a circle. · *"How far is the Eiffel Tower from the Louvre?"* — a connector arrow appears and it speaks the distance. Everything persists until you say *"clear the map."*
+The first vertical taken all the way down. It targets the **direct multi-site operator** — the buyer who owns the stores and the POS, and can act on a pricing or staffing decision this afternoon.
 
-![Zilker Park and Lady Bird Lake drawing onto the 3D city as persistent vector annotations, by voice](docs/media/01-voice-annotate-zilker.gif)
+| Capability | What it does | Status |
+|---|---|---|
+| **Site discovery** | Business name → site network. Places Text Search, Overpass fallback | Works |
+| **Portfolio import** | CSV of your own sites, parsed and placed | Works |
+| **Live congestion** | TomTom flow tiles colored per road segment around each site | Works (keyless = labeled simulation) |
+| **Delay & closure detection** | Bottlenecks and construction on a site's approaches | Works |
+| **Cool-off opportunities** | Congestion → promo trigger, weighted by which side of the road the site sits on relative to the jammed direction of travel | Works |
+| **Competitor discovery** | Nearby competing sites plus a density heatmap | Works — no synthetic fallback |
+| **Per-site ranking** | Ranks sites by opportunity; dollarized *only* against operator actuals | Works |
+| **Fuel price outlook** | EIA regional anchor + asymmetric lagged pass-through + disruption overlay. Explicitly no ML | Works with a free EIA key |
+| **Competitor street prices** | Station-level, live and keyless | Spain and France — see below |
+| **Weather impact** | Per-site weather and its demand effect | Works |
+| **Regional briefing** | News around a site's region | Works |
+| **Health rollups** | View-level and portfolio-level summaries | Works |
+| **View-scoped Q&A** | Ask questions against exactly what is rendered | Works |
 
-![A spoken distance measurement spanning an airport, inspected from orbit](docs/media/04-airport-distance.gif)
+### The uncomfortable part, stated plainly
 
-**🔎 Interrogate it** — analyst queries against the live layers:
-> 🗣️ *"How many flights are over Texas right now?"* · *"Which ships are headed to Oakland?"* · *"What is the biggest fire near Los Angeles?"* · *"Is anything flying above forty thousand feet?"* · *"When does the ISS pass over next?"*
+**US station-level street prices are not freely available.** GasBuddy and OPIS are licensed products, and every "free" alternative found was a scraper operating against a site's terms of service. R.1 therefore does not ship US street prices. It models the regional anchor from EIA public-domain data, or takes actuals from the operator.
 
-**🎛️ Operate it** — the whole console, hands-free:
-> 🗣️ *"Switch to night vision and turn on the flights layer."* · *"Turn on the camera viewsheds."* · *"Play a news radio station near Austin."* · *"Track that plane."* → *"Enter Cockpit."*
+Spain, France, Germany, Italy, and Australia publish genuinely free official station-level feeds, and those are the ones wired up.
 
-**And the rapid-fire tier** — one sentence each:
-> 🗣️ *"Show me global infrastructure."* (stages the layers and pulls back to the globe) · *"Play Orbital Watch."* (a full cinematic scene) · *"Set detection density to fifty percent."* · *"Next contact — helicopters only."* (mid-cockpit) · *"Show me space missions."* · *"Switch to Bing aerial."* · *"Sharpen the image a touch."* · *"Switch to the tactical layout."* · *"What's turned on right now?"*
+Likewise, **"how busy is this store"** is not measured anywhere public. R.1 keeps two things rigidly separate:
 
-![The globe populating with the world's radio stations as another live layer](docs/media/15-global-radio-layer.gif)
+- **Road busy** — *measured*. TomTom flow on the segments around the site. Stated as fact.
+- **Store busy** — *modelled* from road flow × time-of-day × site format, and labeled as such — unless the operator connects POS or loyalty data, at which point it becomes measured.
 
-*Ask for radio near anywhere and the globe starts broadcasting — every station is a real place you can fly to.*
+Full capability specification: **[docs/RETAIL-FUEL-INTELLIGENCE.md](docs/RETAIL-FUEL-INTELLIGENCE.md)**.
 
 ---
 
 ## 🛰️ What's on the Globe
 
-Thirteen live layers. **Ten of them need nothing at all** — no key, no account, no signup.
+The live-world substrate every lens draws on. Thirteen layers; **ten need no key at all.**
 
 | Layer | What you get | Source | Auth |
 |-------|--------------|--------|------|
-| 🗺️ **Map Stack** | Google Photorealistic 3D, Bing aerial, OSM | Google / Ion / OSM | 🔴 Google (required) · 🟡 ion for Bing · 🟢 OSM |
-| ✈️ **Live Flights** | Thousands of live aircraft + route history | OpenSky + adsb.lol | 🟢 (🟡 optional for more polling credits) |
+| 🗺️ **Map Stack** | Google Photorealistic 3D, Bing aerial, OSM | Google / ion / OSM | 🔴 Google (required) · 🟡 ion for Bing · 🟢 OSM |
+| 🏪 **Sites** | Your portfolio or a discovered network, one dot per site | Places / OSM / CSV | 🟡 |
+| 🚗 **Traffic** | Live congestion driving per-vehicle flow below ~8 km | TomTom + OSM | 🟢 (🟡 TomTom makes it real) |
+| ✈️ **Live Flights** | Thousands of live aircraft with route history | OpenSky + adsb.lol | 🟢 (🟡 optional, more credits) |
 | 🎖️ **Military Flights** | ADS-B military traffic in amber | adsb.lol | 🟢 |
-| 🚢 **Live Vessels** | Thousands of ships worldwide | AISStream | 🟡 |
-| 🛰️ **Satellites** | A roughly 840-object core catalog, color-coded by class with a live legend — the **DENSE** chip drops in the whole Starlink shell | CelesTrak | 🟢 |
-| 🌍 **Earthquakes** | Global seismic activity, last 24h | USGS | 🟢 |
-| 🚗 **Traffic** | Live congestion driving per-vehicle flow at street level — dive below ~8 km and the dots color to real jams. Keyless it's an approximate simulation | TomTom + OSM | 🟢 (🟡 TomTom makes it real — get one) |
-| 📹 **CCTV Mesh** | ~800 public cameras projected *into* the 3D space — Austin · California (Caltrans) · London (TfL). Positions are published; poses are estimated priors **you calibrate by dragging a gizmo on the camera itself** | City APIs | 🟢 |
-| 📻 **Radio** | Geolocated world radio with an **analog tuner** — drag the needle across up to 750 stations and the globe flies to each broadcaster | Radio Browser / broadcasters | 🟢 |
+| 🚢 **Live Vessels** | Global ship traffic — also feeds the disruption index | AISStream | 🟡 |
+| 🛰️ **Satellites** | ~840-object core catalog; **DENSE** adds the Starlink shell | CelesTrak | 🟢 |
+| 🌍 **Earthquakes** | Global seismic activity, last 24 h | USGS | 🟢 |
+| 📹 **CCTV Mesh** | ~800 public cameras projected *into* the 3D scene, with calibratable pose | City APIs | 🟢 |
+| 📻 **Radio** | Geolocated stations with an analog tuner | Radio Browser | 🟢 |
 | 🚲 **Bikeshare** | Live station availability | GBFS | 🟢 |
-| 🔥 **Active Fires** | Live NASA FIRMS detections, trailing 24h | NASA FIRMS | 🟡 |
-| 🚀 **Space Missions** | Rolling 30-day launches with payload, stage, and recovery detail | Launch Library 2 | 🟢 (🟡 optional token raises the allowance) |
-| 🎖️ **Mapped Installations** | Viewport-bounded military-site context from community mapping — incomplete by nature, and labeled that way | OpenStreetMap | 🟢 |
+| 🔥 **Active Fires** | NASA FIRMS detections, trailing 24 h | NASA FIRMS | 🟡 |
+| 🚀 **Space Missions** | Rolling 30-day launches | Launch Library 2 | 🟢 (🟡 raises allowance) |
 
-**Also on the globe:** neighborhood overlays · an optional cockpit WX cloud effect. **Bundled static infrastructure:** Datacenters (4,351), Dams (704), and Submarine Cables (712).
+**Bundled static infrastructure:** datacenters (4,351), dams (704), submarine cables (712). **Also available:** GLSL sensor styles, a screen-space detection overlay, cockpit view, a scene director, and share links that serialize camera, style, layers, and one tracked target into a URL.
 
-**Missing a layer you want?** Open an issue — or add it and send the PR.
+Layers that model rather than measure say so on their own face — keyless traffic is labeled a simulation, camera poses are estimated priors until you calibrate them, and launch ascent playback is marked `RECONSTRUCTED ESTIMATE`.
 
 ---
 
-## 🎖️ Field Missions
+## 🎙️ Ask It
 
-Once the basics click, run these:
+Voice needs an **OpenAI key**. Without one everything else runs; the mic button reports that voice is unavailable.
 
-| Mission | How |
-|---|---|
-| **🚁 Ask the planet** | *"Why are all these military helicopters flying in circles?"* Select a military track — it silently backfills ~24 h of real trace history — and see what it's been doing, resolved as stacked 3D loops. |
-| **✈️ Final approach** | Click-track an airliner lining up for a runway, hop into the **cockpit**, and ride it down. |
-| **🌃 Night watch** | Fly to your own city, switch to **NVG**, and let the detection mesh and HUD read the scene. |
-| **🚢 Port call** | Vessels on over the Port of Long Beach. Click a tanker for its tactical card and wake trail — then hit **NEAREST** in the CCTV panel and look at the same water through a public camera. |
-| **📻 Tokyo FM** | Orbit Shibuya with the **Radio** layer on — then drag the analog tuner needle: every position snaps to a real station and the globe flies to whoever's broadcasting. |
-| **🔥 Fire line** | FIRMS over California. Click a detection — the camera dives to it — read the intensity, then hit **NEAREST** in the CCTV panel for a ground view. |
-| **🚶 Ask for a walking route** *🎙️* | Tell the world where you want to go and watch a real street-following route trace itself through the 3D city — then *"fly it"*: banked turns, eased ends, a camera that leads the path like a drone shot. |
-| **📏 Measure LAX to DFW** *🎙️* | *"How far is LAX from DFW?"* — an arrow spans the country, the distance lands in the caption, and the endpoints stay pinned to the real world as you orbit. |
-| **🚀 Launch replay** | Open **Space Missions**, pick a launch from the last 30 days, and ride the T-minus countdown through ascent to orbit — scrub it at 0.25×–4×. Labeled `RECONSTRUCTED ESTIMATE`, because it is one. |
-| **🪦 Walk the boneyard** | Fly from regional context down into dense, fully resolved rows of retired aircraft. |
-| **🏗️ Orbit Three Gorges** | Sweep the dam and its terrain at a glance — then flip on the **Dams** layer and find 703 more. |
-| **🌊 Trace the backbone** | Dive to the Bahamas with **Submarine Cables** on — labeled routes reveal beneath the water, 712 of them worldwide. |
+**Forty tools**, and the twelve commercial ones are the same functions the buttons call:
 
-*🎙️ = voice missions — they need an OpenAI key.*
+> ⛽ *"Find every Casey's near Des Moines and put them on the map."*
+> 📉 *"Which of my sites is bleeding the most right now?"*
+> 🚧 *"What's blocking the approaches to site 14?"*
+> 💵 *"What happens to my fuel margin over the next two weeks?"*
+> 🏁 *"Who am I competing with within three miles of here?"*
+> 🌦️ *"How is the weather going to hit this site tomorrow?"*
 
-![Resolving a selected aircraft's recent flight path into stacked 3D loops above the terrain](docs/media/07-helicopter-loops.gif)
+…plus the full globe console — camera moves, layer control, annotation, cockpit, and analyst queries against the live layers.
 
-*Ask the planet: a military contact's last ~24 hours of real trace history, resolved as stacked 3D loops.*
+**How it stays honest:** the agent pulls live scene context before answering, so it reasons about what is actually rendered. At street level it reads a viewport screenshot to identify legible signage, and is instructed never to invent labels. It confirms only actions that actually succeeded. Your `OPENAI_API_KEY` never reaches the browser — the client receives a short-lived session token, and each session carries a **$5 in-app cap** with a warning at $2.
 
-![Asking for a walking route and flying the generated path through the 3D city](docs/media/10-walking-route-flythrough.gif)
-
-*"Draw the walking route… now fly it" — banked turns, eased ends, the camera leading the path like a drone shot.*
-
-![Descending from regional context into dense rows of retired aircraft at the boneyard](docs/media/08-boneyard.gif)
-
-*Walk the boneyard: rows of retired airframes, fully resolved in 3D.*
-
-![A reconstructed Falcon 9 ascent climbing and curving into its projected orbit](docs/media/08-falcon9-replay.gif)
-
-*Launch replay: a Falcon 9 ascent, labeled `RECONSTRUCTED ESTIMATE`, scrubbable 0.25×–4×.*
-
-![Diving into the Bahamas and revealing labeled submarine cable routes beneath the globe](docs/media/09-undersea-cables.gif)
-
-*Trace the backbone: the submarine cable routes under the Bahamas.*
+<!-- CAPTURE: a spoken portfolio question and the answer resolving on the globe -->
 
 ---
 
 ## 🔧 Under the Hood
 
-Some of the engineering that makes it feel real rather than like a tech demo:
-
-- **World-stable icons.** Aircraft and ships point along their *true real-world heading* at every camera angle — tracked or not, looking straight down or across the horizon — via per-frame screen-space course projection. No spinning, no viewport-locking.
-- **Smooth motion from choppy data.** Live feeds arrive every 15–30s; the globe renders one interval behind real time and interpolates between known fixes. Dead reckoning fills the gaps.
-- **Honest satellites.** SGP4 propagation with orbit rings that stay locked to their satellites via GMST realignment — no drift, no per-second flicker.
-- **Sits on the real ground.** Entity heights run through a real vertical datum — geoid-aware, sampled against the *rendered* terrain mesh — so aircraft park on aprons and cameras stand on street corners instead of floating.
-- **Spends your quota like it's its own.** The paid feeds run behind cached, budget-governed proxies — an OpenSky credit governor, a TomTom daily tile budget, disk-cached TLEs — so an afternoon of exploring doesn't torch an API allowance.
-- **Local-first key handling.** Secret-bearing providers such as OpenAI, AISStream, OpenSky OAuth, TomTom, and FIRMS are brokered server-side. Proxy destinations are fixed or allowlisted, and the higher-risk paths add bounded requests, timeouts, response caps, and sanitized errors as appropriate. The only provider credentials intentionally exposed to the browser are Google Maps and Cesium ion; restrict both at the provider.
-- **No framework.** Vanilla JavaScript, **CesiumJS**, and **Vite** — plus **Google Photorealistic 3D Tiles** for the planet and the **OpenAI Realtime API** for voice. Fast to read, fast to hack on.
+- **No framework.** Vanilla ES modules, **CesiumJS**, and **Vite**. Fast to read, fast to change.
+- **`vite.config.js` is also the server.** Every route needing a private key is Vite middleware registered under *both* `configureServer` and `configurePreviewServer` — key brokering is not dev-only.
+- **Capabilities are plain functions.** `analyzeCompetitivePosition()`, `fetchTrafficDelays()`, and `evaluateCoolOffOpportunities()` are pure async functions with typed returns. The voice layer dispatches to them; it does not own them.
+- **World-stable icons.** Aircraft and vessels point along their true real-world heading at every camera angle, via per-frame screen-space course projection.
+- **Smooth motion from choppy data.** Feeds arrive every 15–30 s; the globe renders one interval behind and interpolates between known fixes, with dead reckoning across gaps.
+- **Sits on the real ground.** Entity heights run through a geoid-aware vertical datum sampled against the *rendered* terrain mesh, so things rest on surfaces instead of floating.
+- **Spends your quota like it's its own.** Paid feeds sit behind cached, budget-governed proxies — an OpenSky credit governor, a TomTom daily tile budget, disk-cached TLEs.
 
 ```
 src/
-├── main.js                 # Bootstrap: Google 3D tiles, layer registration
-├── ui.js                   # Runtime UI — panels, HUD, styles, control facade
-├── hud.js                  # Intelligence HUD + AI scene summary
-├── mapStackController.js   # Google 3D / Bing / OSM switching
-├── iconOrientation.js      # Screen-projected world-space headings + horizon cull
-├── voice/                  # OpenAI Realtime session + 28 voice tools
-├── data/                   # One module per layer + management + context store
-│   └── local_data/         # Bundled datasets (per-folder provenance)
-└── scenes/                 # Cinematic scene director
+├── main.js          # Bootstrap: Google 3D tiles, layer registration
+├── ui.js            # Runtime UI — panels, HUD, control facade
+├── hud.js           # Intelligence HUD + AI scene summary
+├── portfolio/       # Sites, competitors, gap model, fuel price, plays
+├── ontology/        # Industry lenses + intent engine
+├── voice/           # OpenAI Realtime session + 40 voice tools
+├── data/            # One module per layer + manager + context store
+│   └── local_data/  # Bundled datasets (per-folder provenance)
+├── styles/          # GLSL post-process visual styles
+└── scenes/          # Cinematic scene director
 ```
 
-See [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md) for the authoritative runtime reference.
-
----
-
-## 🔑 API Keys
-
-**The legend, one more time:** 🟢 **no signup** — works out of the box · 🟡 **free key** — register, paste, done · 🔴 **metered** — a billing-enabled account; costs are small but real.
-
-Most of the globe is 🟢: flights (anonymous), military traffic, satellites, earthquakes, CCTV, radio, bikeshare, space missions, mapped installations, and every bundled dataset run with **zero keys**.
-
-### What you need for the good experience
-
-Five keys cover the fully keyed experience. Three currently offer no-cost developer access; Google Maps and OpenAI are usage-metered. Provider prices and allowances change, so use the linked pricing pages before relying on a budget estimate:
-
-| | Key | Why | Get it |
-|---|-----|-----|--------|
-| 🔴 | **Google Maps** *(required)* | The photorealistic 3D planet ([Map Tiles API](https://developers.google.com/maps/documentation/tile)) | [Google Cloud Console](https://console.cloud.google.com/) — metered; [check current pricing](https://developers.google.com/maps/billing-and-pricing/pricing) and URL-restrict it |
-| 🔴 | **OpenAI** | 🎙️ The voice experience + AI HUD summary. Want another provider behind the mic? PRs welcome | [platform.openai.com](https://platform.openai.com) — metered; [check current API pricing](https://openai.com/api/pricing/) |
-| 🟡 | **AISStream** | 🚢 Live global ships | [aisstream.io](https://aisstream.io) — free, seriously, it's a two-minute signup |
-| 🟡 | **NASA FIRMS** | 🔥 Live active fires | [firms.modaps.eosdis.nasa.gov](https://firms.modaps.eosdis.nasa.gov/api/map_key/) — free |
-| 🟡 | **TomTom** | 🚦 Real traffic instead of an approximate simulation | [developer.tomtom.com](https://developer.tomtom.com) — check the current developer allowance for your account |
-
-*What the TomTom key buys you: step 5 of [The First Five Minutes](#-the-first-five-minutes) for real — actual rush-hour density painted on the city instead of an approximate simulation.*
-
-### Cherry on top
-
-| | Key | Why | Get it |
-|---|-----|-----|--------|
-| 🟡 | **Cesium ion** | 🗺️ Bing imagery map stacks (public `assets:read` token) | [cesium.com/ion](https://cesium.com/ion) — [check the plan that fits your use](https://cesium.com/platform/cesium-ion/pricing/) |
-| 🟡 | **OpenSky** | ✈️ More flight-polling credits (🟢 anonymous works without) | [opensky-network.org](https://opensky-network.org) |
-| 🟡 | **Launch Library 2** | 🚀 Higher space-missions request allowance (🟢 works without) | [thespacedevs.com](https://thespacedevs.com) |
-
-All of them are worth getting. None of them are required to start.
+Tests are colocated `*.test.mjs` files run by `scripts/run-unit-tests.mjs` — no external test framework.
 
 ```bash
-# Put keys in .env (see .env.example), or pass them as env vars:
-OPENAI_API_KEY="…" AISSTREAM_API_KEY="…" npm run dev -- --host localhost --port 4173
+npm run build      # must pass
+npm test           # must pass
+npm run test:track # must pass (needs the dev server up)
 ```
 
-On macOS you can also keep any key in the Keychain and `./scripts/dev-fresh.sh` pulls them in — the `security add-generic-password` service names are documented in `.env.example`.
+---
 
-OpenSky can run fully anonymous (`OPENSKY_AUTH_MODE=anon`), or import OAuth credentials with `./scripts/opensky-import-client.sh /path/to/credentials.json`.
+## 🔑 Keys & Costs
 
-### 💸 What it actually costs
+**Legend:** 🟢 no signup · 🟡 free key · 🔴 metered.
 
-Honest numbers, roughly, as of mid-2026 — always check the provider pricing pages:
+| | Key | Buys you | Get it |
+|---|-----|-----|--------|
+| 🔴 | **Google Maps** *(required)* | The photorealistic 3D planet | [Google Cloud Console](https://console.cloud.google.com/) — [pricing](https://developers.google.com/maps/billing-and-pricing/pricing); URL-restrict it |
+| 🔴 | **OpenAI** | Voice control + the AI HUD summary | [platform.openai.com](https://platform.openai.com) — [pricing](https://openai.com/api/pricing/) |
+| 🟡 | **TomTom** | Real congestion instead of a labeled simulation | [developer.tomtom.com](https://developer.tomtom.com) |
+| 🟡 | **EIA** | The fuel price anchor and forecast | [eia.gov/opendata](https://www.eia.gov/opendata/) — free, US public domain |
+| 🟡 | **AISStream** | Global vessels, and the disruption index | [aisstream.io](https://aisstream.io) — free |
+| 🟡 | **NASA FIRMS** | Live active fires | [firms.modaps.eosdis.nasa.gov](https://firms.modaps.eosdis.nasa.gov/api/map_key/) — free |
+| 🟡 | **Cesium ion** | Bing imagery map stacks | [cesium.com/ion](https://cesium.com/ion) |
+| 🟡 | **OpenSky** | More flight-polling credits (🟢 anonymous works) | [opensky-network.org](https://opensky-network.org) |
+| 🟡 | **Launch Library 2** | Higher space-missions allowance (🟢 works without) | [thespacedevs.com](https://thespacedevs.com) |
 
-| | Cost reality |
-|---|---|
-| **🟢 Most layers** | **$0, no signup.** OpenSky anon, USGS, CelesTrak, adsb.lol, city CCTV, Radio Browser, GBFS, Launch Library 2, bundled datasets. |
-| **🟡 Optional developer access** | AISStream, FIRMS, TomTom, Cesium ion, and authenticated OpenSky may offer no-cost access, but limits and permitted uses differ. Cesium ion and OpenSky in particular have plan or use restrictions; verify the current provider terms for your deployment. |
-| **🔴 Google 3D tiles** | More generous than you'd guess: billing counts **root tileset requests** — one buys up to **three hours** of unlimited tile rendering — and the first **1,000 per month are free**, then about **$6 per 1,000** (US pricing; [check the current page](https://developers.google.com/maps/billing-and-pricing/pricing), rates vary by billing region). A solo user rarely leaves the free tier. Still: restrict the key, set quotas, and configure a budget alert before sustained use. |
-| **🔴 OpenAI voice** | Realtime audio is usage-metered and the total depends on the selected model, conversation length, and audio volume. The app shows a live session estimate, warns at $2, and applies a **$5 in-app session cap**; provider-side usage limits remain the billing backstop. |
+**What it actually costs.** Most layers are $0 with no signup. Google 3D tiles bill per *root tileset request* — one buys up to three hours of unlimited tile rendering, the first 1,000 per month are free, then roughly $6 per 1,000 (US pricing; rates vary by billing region). A single user rarely leaves the free tier. OpenAI Realtime is metered by model, conversation length, and audio volume; the app shows a live session estimate and caps the session at $5.
 
-### 🧗 The floor is low on purpose
-
-Everything above is the deliberately cheap baseline — enough to get a real taste of geospatial intelligence, GEOINT, and OSINT without ever talking to a sales team. You'll also notice the ceiling: terrestrial AIS goes quiet mid-ocean and satellite AIS costs real money; premium imagery, SAR, and the deeper commercial feeds live behind enterprise contracts. That's not a limit of the architecture — every layer here is a pattern you can point at your own data sources. This repo hands you the foundation; what you fuse into it is up to you.
-
-### 🔒 Sharing an instance
-
-By default nobody else can reach your server — it binds to localhost. To share on your LAN, opt in explicitly (`npm run dev -- --host 0.0.0.0 --port 4173`, or `HOST=0.0.0.0 ./scripts/dev-fresh.sh` on macOS/Linux) — but know that ⚠️ **a LAN-visible server brokers your configured API keys to anyone who can reach it.** Set the per-IP throttles (`GEV_RATELIMIT_OPENAI_PER_MIN`, `GEV_RATELIMIT_GOOGLE_PER_MIN` — see `.env.example`) and, before anything else, **set provider-side budget caps** (Google Cloud budgets, OpenAI usage limits): the throttles are app-level guards, not billing caps. Full threat model in [SECURITY.md](SECURITY.md).
+Provider prices and allowances change. Check the linked pages before relying on any of this, restrict every key at the provider, and set budget alerts — **the app's throttles are guards, not billing caps.**
 
 ---
 
-## 📋 Responsible & Open
+## 🌐 Running It Somewhere Else
 
-God's Eye View runs on **public data, clear sources, and local-first execution.** No secrets, no private datasets, no mystery scraping — anything involving a private key is brokered server-side. It has the visual grammar of a classified ops room, built entirely from open signals and inspectable code.
+**This is not a static site.** `npm run build` produces a client bundle, but the key-brokering middleware only runs inside Vite's own server. That means:
 
-**The line.** This project models **events, assets, infrastructure, and systems** — aircraft, vessels, satellites, fires, cameras, cities. It does not build features for named-person search, face recognition, or tracking individuals, and pull requests that cross that line won't be merged. People are not a query type here.
+- **A static host cannot serve this.** On GitHub Pages or a plain CDN, every proxied layer breaks — vessels, fires, voice, traffic, fuel prices, OpenSky — and only the two client-side keys (Google Maps, Cesium ion) would work at all.
+- **You need a Node-capable host** running `vite preview`, or a small custom server reusing the same middleware, with the keys as server env vars — Fly.io, Render, a VPS, a container. Serverless tiers could work, but the middleware would need porting to that runtime's handler shape.
+- **Before exposing it beyond localhost**, read the network-exposure section of [SECURITY.md](SECURITY.md). A LAN-visible server brokers your configured API keys to anyone who can reach it. Set the per-IP throttles (`R1_RATELIMIT_OPENAI_PER_MIN`, `R1_RATELIMIT_GOOGLE_PER_MIN`) *and* provider-side budget caps first.
 
-**Come build it.** This is the canonical live 3D client from the project that kicked off the recent wave of spatial-intelligence tools — and it's a canvas: the layers here are the signals one person could find and fuse. Add a city pack, a data source, a style, a voice tool. It's the window through which you see the world; bring that window to others.
+---
 
-**Status:** An evolving open-source client for exploration and learning — a fast, hackable foundation, not a hardened production service. Released under the **[MIT License](LICENSE)**. Bundled and live datasets carry their own terms — see **[DATA_SOURCES.md](DATA_SOURCES.md)**. Security model: **[SECURITY.md](SECURITY.md)**. Want to contribute? **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+## 📚 Documentation
 
-<sub>Media note: Bilawal Sidhu created and owns the 17 capture GIFs on this page. He also published the two README PNGs in the existing public project and authorized their continued inclusion here. Any appearance by Bilawal is included with his permission. These files are project documentation, not MIT-licensed standalone assets. Platform interfaces, trademarks, avatars, data, and third-party imagery visible within them remain subject to their respective owners' terms. See [media provenance](docs/media/README.md) and [source terms](DATA_SOURCES.md).</sub>
+| Doc | What it's for |
+|---|---|
+| [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | The authoritative runtime reference. Read it first for any behavior question |
+| [docs/RETAIL-FUEL-INTELLIGENCE.md](docs/RETAIL-FUEL-INTELLIGENCE.md) | The fuel & convenience capability spec — price model, data reality, build order |
+| [docs/DESIGN-V5.md](docs/DESIGN-V5.md) | Visual identity spec. Binding for any change to HUD chrome |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Architecture in a minute, coding style, PR checklist |
+| [SECURITY.md](SECURITY.md) | The secrets and threat model — why each proxy endpoint exists |
+| [DATA_SOURCES.md](DATA_SOURCES.md) | License and attribution per data feed |
+| [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) | Check before "fixing" a known quirk |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Frame budget and measured cold-start numbers |
+| [TESTING.md](TESTING.md) | Manual test protocol for voice and live tracking |
+
+---
+
+## 📋 Responsible Use
+
+R.1 runs on **public data, named sources, and local-first execution.** No private datasets, no mystery scraping. Anything involving a private key is brokered server-side, and third-party fetches go through fixed or allowlisted proxy destinations rather than arbitrary URLs.
+
+**The line.** R.1 models **sites, events, assets, infrastructure, and systems** — stores, road networks, vessels, aircraft, weather, prices. It does not build features for named-person search, face recognition, or tracking individuals, and pull requests that cross that line will not be merged. People are not a query type here.
+
+**Status.** An actively developed console, not a hardened production service. Released under the **[MIT License](LICENSE)** — which covers the *source code only*. Bundled and live datasets keep their own terms; see **[DATA_SOURCES.md](DATA_SOURCES.md)**, and note that the bundled submarine-cable dataset is NonCommercial.
 
 > [!IMPORTANT]
-> God's Eye View is an exploratory visualization of public and third-party data.
-> Data may be delayed, incomplete, modeled, inferred, or wrong. Do not use it
-> for flight or maritime navigation, emergency response, medical or health
-> decisions, investment decisions, or other safety-critical or operational
-> purposes. Verify important information with authoritative sources.
+> R.1 visualizes public and third-party data, and models what it cannot measure.
+> Data may be delayed, incomplete, modelled, inferred, or wrong. Do not use it for
+> flight or maritime navigation, emergency response, medical decisions, investment
+> decisions, or other safety-critical purposes. Commercial figures are decision
+> support, not accounting. Verify anything that matters against authoritative sources.
 
 ---
 
-## 🧭 What's Next
+## 🙏 Credits
 
-First — thank you. To everyone who watched the God-view demos and went off to build their own, and to everyone who kept asking for the code: I'm grateful. And when I polled whether this should go open source, you weren't subtle about it:
+R.1's globe substrate began as a fork of **[God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)**, created and open-sourced under the MIT License by **[Bilawal Sidhu](https://github.com/bilawalsidhu)**. The photorealistic-globe rendering, the live aircraft, vessel and satellite layers, the CCTV projection mesh, and the original Realtime voice architecture all descend from that work, and R.1 would not exist without it. Thank you.
 
-<img src="docs/media/open-source-survey.png" alt="Community survey on open-sourcing God's Eye View" width="460">
+R.1 has since diverged into a different product for a different buyer — an operator's decision console rather than a world-exploration client — but the debt is real, and the license is retained in full. See [LICENSE](LICENSE).
 
-So here it is. Step inside the spy-thriller cockpit — except the data is real — and let's turn this into our shared sandbox for making sense of the world, and have fun doing it. This repo is the baseline, it stays open, and the whole point is for you to break things and bolt on layers we haven't thought of yet.
-
-One heads-up from the inside: build in this space for a week and you learn that **the present is the cheap part**. The moment you try to go back in time — tiling, serving, and scrubbing *what happened* and *what changed* at any real resolution — the data gets expensive and the compute gets brutal. For that, we're building something cool. More in the future — [halfpixel.ai](https://halfpixel.ai).
+The 3D models under `public/models/` and every bundled dataset carry their own authors and licenses, recorded in [`public/models/README.md`](public/models/README.md) and [DATA_SOURCES.md](DATA_SOURCES.md).
 
 ---
 
 <div align="center">
 
-▶️ [Watch the God's Eye View series](https://youtube.com/playlist?list=PL6qSg2I-7_koPbDnSMo0QeeHX_RknA2uv&si=nBGYMoHWQw41v93Q) · 📬 [Map the World](https://maptheworld.ai/) — the newsletter behind the project
-
-**🌐 God's Eye View. No place left behind.**
+**R.1 — Commercial Intelligence**
 
 </div>

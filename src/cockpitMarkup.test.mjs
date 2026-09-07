@@ -12,7 +12,7 @@ const css = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
 const sceneDirector = fs.readFileSync(path.join(ROOT, 'src', 'scenes', 'director.js'), 'utf8');
 const manager = fs.readFileSync(path.join(ROOT, 'src', 'data', 'manager.js'), 'utf8');
 const contextLayer = fs.readFileSync(path.join(ROOT, 'src', 'data', 'militaryAwareness.js'), 'utf8');
-const voiceActions = fs.readFileSync(path.join(ROOT, 'src', 'voice', 'gevActions.js'), 'utf8');
+const voiceActions = fs.readFileSync(path.join(ROOT, 'src', 'voice', 'r1Actions.js'), 'utf8');
 
 test('Cockpit has one reset action beside its bottom exit path', () => {
   assert.doesNotMatch(html, /id="cockpit-quick-entry"/);
@@ -108,7 +108,7 @@ test('Cockpit Escape handling precedes form-control shortcut suppression and foc
   assert.doesNotMatch(exit[1], /applyTrackedCameraFrame/);
   assert.match(
     ui,
-    /restoreTrackingFrame: \(entity\) => \{[\s\S]*?gevTrackedId[\s\S]*?flightsLayer\.refocusTrackedById[\s\S]*?militaryFlightsLayer\.refocusTrackedById/,
+    /restoreTrackingFrame: \(entity\) => \{[\s\S]*?r1TrackedId[\s\S]*?flightsLayer\.refocusTrackedById[\s\S]*?militaryFlightsLayer\.refocusTrackedById/,
     'Cockpit exit must return camera-frame ownership through the source layer so Contact Focus cannot accumulate a second owner',
   );
 });
@@ -173,7 +173,7 @@ test('the cockpit reads its aircraft from the layer that owns Cesium tracking', 
   const read = ui.match(/\n  readAircraftInfo\(\) \{([\s\S]*?)\n  \}/);
   assert.ok(read, 'readAircraftInfo is missing');
   assert.match(read[1], /resolveTrackedAircraftInfo\(\{/);
-  assert.match(read[1], /gevTrackedId/);
+  assert.match(read[1], /r1TrackedId/);
   // In cockpit mode the controller moves the entity off viewer.trackedEntity,
   // so its own handle is the tracked identity there.
   assert.match(read[1], /this\.viewer\?\.trackedEntity \|\| this\.trackedEntity/);
@@ -245,9 +245,9 @@ test('Cockpit owns a focused shared Display portal and compact Radio controls', 
   assert.match(css, /#pp-toggles\s*\{[\s\S]*?--pp-expanded-width:\s*var\(--display-panel-expanded-width\)/);
   assert.match(css, /is-expanded:has\(\[data-cockpit-launcher="display"\]\)\s*\{[\s\S]*?width:\s*var\(--display-panel-expanded-width\)/);
   assert.doesNotMatch(ui, /--cockpit-display-expanded-width|dataPanelWidth/);
-  assert.match(css, /is-expanded:has\(\[data-cockpit-launcher="display"\]\)[\s\S]*?box-shadow:\s*0 8px 32px rgba\(0, 0, 0, \.42\)/);
+  assert.match(css, /is-expanded:has\(\[data-cockpit-launcher="display"\]\)[\s\S]*?box-shadow:\s*var\(--shadow-overlay\)/);
   assert.match(css, /\.cockpit-utility-control\.is-expanded \.cockpit-utility-launcher\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/);
-  assert.match(css, /\.cockpit-utility-control\.is-expanded \.cockpit-utility-divider\s*\{[\s\S]*?linear-gradient\(90deg, rgb\(0 212 255 \/ 28%\), rgba\(0, 212, 255, 0\.18\) 58%, transparent\)[\s\S]*?box-shadow:\s*0 0 7px rgba\(0, 212, 255, \.22\);/);
+  assert.match(css, /\.cockpit-utility-control\.is-expanded \.cockpit-utility-divider\s*\{[\s\S]*?background:\s*var\(--glass-border-hover\);/);
   assert.match(ui, /this\._cockpitDisplayToggleBtn\.textContent = displayOpen \? '▶' : '◀';/);
   assert.match(ui, /this\._cockpitRadioToggleBtn\.textContent = radioOpen \? '▶' : '◀';/);
   assert.match(css, /#cockpit-display-panel\s*\{[\s\S]*?display:\s*flex;[\s\S]*?gap:\s*7px;[\s\S]*?padding:\s*0;[\s\S]*?border-top:\s*0;/);
@@ -326,11 +326,11 @@ test('Cockpit side surfaces behave as two single-expanded accordions', () => {
   );
   assert.match(
     ui,
-    /'gev:cockpit-signal-expanded'[\s\S]*?setCockpitDisclosure\('display', false\);/,
+    /'r1:cockpit-signal-expanded'[\s\S]*?setCockpitDisclosure\('display', false\);/,
   );
   assert.match(
     ui,
-    /'gev:cockpit-context-expanded'[\s\S]*?setPanelCollapsed\('data-panel', true\);/,
+    /'r1:cockpit-context-expanded'[\s\S]*?setPanelCollapsed\('data-panel', true\);/,
   );
   assert.match(
     ui,
@@ -343,12 +343,12 @@ test('Cockpit side surfaces behave as two single-expanded accordions', () => {
   );
   assert.match(
     ui,
-    /const wasCollapsed = this\.contextCollapsed;[\s\S]*?this\.active && wasCollapsed && !this\.contextCollapsed[\s\S]*?'gev:cockpit-context-expanded'/,
+    /const wasCollapsed = this\.contextCollapsed;[\s\S]*?this\.active && wasCollapsed && !this\.contextCollapsed[\s\S]*?'r1:cockpit-context-expanded'/,
     'Contact expansion must notify only on a collapsed-to-expanded transition',
   );
   assert.match(
     ui,
-    /const wasCollapsed = this\.signalCollapsed;[\s\S]*?this\.active && wasCollapsed && !this\.signalCollapsed[\s\S]*?'gev:cockpit-signal-expanded'/,
+    /const wasCollapsed = this\.signalCollapsed;[\s\S]*?this\.active && wasCollapsed && !this\.signalCollapsed[\s\S]*?'r1:cockpit-signal-expanded'/,
     'Live Signals expansion must notify only on a collapsed-to-expanded transition',
   );
   assert.match(
@@ -639,7 +639,7 @@ test('Cockpit Display portals shared HUD, Detection, Parameters, and 3D controls
   assert.doesNotMatch(ui, /\['presets',/);
   assert.match(
     ui,
-    /group\.before\(anchor\)[\s\S]*?window\.addEventListener\('gev:cockpit-mode-changed', this\._cockpitDisplayModeHandler\)/,
+    /group\.before\(anchor\)[\s\S]*?window\.addEventListener\('r1:cockpit-mode-changed', this\._cockpitDisplayModeHandler\)/,
   );
   assert.match(
     ui,
@@ -647,7 +647,7 @@ test('Cockpit Display portals shared HUD, Detection, Parameters, and 3D controls
   );
   assert.match(
     ui,
-    /window\.removeEventListener\('gev:cockpit-mode-changed', this\._cockpitDisplayModeHandler\)[\s\S]*?_setCockpitDisplayPortalActive\(false\)[\s\S]*?record\.anchor\.remove\(\)/,
+    /window\.removeEventListener\('r1:cockpit-mode-changed', this\._cockpitDisplayModeHandler\)[\s\S]*?_setCockpitDisplayPortalActive\(false\)[\s\S]*?record\.anchor\.remove\(\)/,
   );
   assert.doesNotMatch(ui, /_cycleCockpitHud|_cockpitModels3dToggle|_cockpitDetectionToggle/);
   assert.equal((html.match(/id="style-buttons"/g) || []).length, 1);

@@ -664,13 +664,13 @@ export function initSitesPanel({ viewer, styleManager, dataManager } = {}) {
   _contextClearedHandler = (event) => {
     if (event.detail?.layerId === SITES_LAYER_ID) clearBrief();
   };
-  window.addEventListener('gev:entity-selected', _contextSelectedHandler);
-  window.addEventListener('gev:entity-selection-cleared', _contextClearedHandler);
+  window.addEventListener('r1:entity-selected', _contextSelectedHandler);
+  window.addEventListener('r1:entity-selection-cleared', _contextClearedHandler);
 }
 
 export function destroySitesPanel() {
-  if (_contextSelectedHandler) window.removeEventListener('gev:entity-selected', _contextSelectedHandler);
-  if (_contextClearedHandler) window.removeEventListener('gev:entity-selection-cleared', _contextClearedHandler);
+  if (_contextSelectedHandler) window.removeEventListener('r1:entity-selected', _contextSelectedHandler);
+  if (_contextClearedHandler) window.removeEventListener('r1:entity-selection-cleared', _contextClearedHandler);
   _contextSelectedHandler = null;
   _contextClearedHandler = null;
   _briefAbort?.abort();

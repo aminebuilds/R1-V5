@@ -19,7 +19,7 @@ const toMGRS = mgrsModule.forward || mgrsModule;
 import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
 import { ellipsoidalToMslDisplayM, ensureGeoidReady, geoidHeight } from './data/geoid.js';
-import { getBasemapLabelContext } from './voice/gevActions.js';
+import { getBasemapLabelContext } from './voice/r1Actions.js';
 
 /** Color palettes keyed by shader mode; applied as CSS custom properties. */
 const HUD_COLORS = {
@@ -35,6 +35,9 @@ const MILITARY_STYLES = new Set(['retro', 'surveillance', 'thermal']);
 /** Allowed HUD layout variants. */
 const HUD_VARIANTS = new Set(['tactical', 'operator', 'minimal']);
 const HUD_SUMMARY_INTERVAL_MS = 15000;
+
+/** Portfolio-read repaint cadence. Local computation, so it can be brisk. */
+const HUD_INTEL_INTERVAL_MS = 2000;
 const HUD_SUMMARY_URL = '/api/openai/hud-summary';
 
 /**
@@ -69,13 +72,14 @@ export class IntelHUD {
   constructor(viewer) {
     this.viewer = viewer;
     this._visible = false;
+    /** @type {(() => object|null)|null} */
+    this._intelSource = null;
+    this._intelInterval = null;
     this._autoMode = true; // auto show/hide based on style
     this._currentStyle = 'normal';
     this._el = null;
     this._variant = 'tactical';
-    this._recBlinkState = true;
     this._updateInterval = null;
-    this._recBlinkInterval = null;
     this._timestampInterval = null;
     this._summaryInterval = null;
     this._summaryTypingInterval = null;
@@ -124,12 +128,6 @@ export class IntelHUD {
       }
     };
 
-    // Session-consistent pseudorandom identifiers (generated once at construction)
-    this._missionId = `KH11-${4000 + Math.floor(Math.random() * 200)}`;
-    this._sensorId = `OPS-${4100 + Math.floor(Math.random() * 100)}`;
-    this._orbitNum = 47000 + Math.floor(Math.random() * 1000);
-    this._passNum = 100 + Math.floor(Math.random() * 200);
-
     this._buildDOM();
     this.viewer.camera.moveEnd.addEventListener(this._onCameraMoveEnd);
     this._startTimers();
@@ -145,63 +143,37 @@ export class IntelHUD {
     if (!this._el) return;
 
     this._el.innerHTML = `
-      <div class="hud-top-bar">
-        <span class="hud-top-bar-left">TOP SECRET // SI-TK // NOFORN</span>
-        <span class="hud-top-bar-center">${this._missionId}</span>
-        <span class="hud-top-bar-right">PAGE 1/1</span>
-      </div>
-
       <div class="hud-corner hud-top-left">
-        <div class="hud-bracket">┌</div>
         <div class="hud-content">
-          <div class="hud-classification">TOP SECRET // SI-TK // NOFORN</div>
-          <div class="hud-system">${this._missionId}  ${this._sensorId}</div>
-          <div class="hud-mode" id="hud-mode">NORMAL</div>
           <div class="hud-summary-wrap">
-            <div class="hud-summary-label">SUMMARY</div>
-            <div class="hud-summary" id="hud-summary">Awaiting telemetry...</div>
+            <div class="hud-summary-label">In view</div>
+            <div class="hud-summary" id="hud-summary">Awaiting telemetry…</div>
+          </div>
+          <div class="hud-intel" id="hud-intel" data-state="empty">
+            <div class="hud-intel-label">Portfolio read</div>
+            <div class="hud-intel-line" id="hud-intel-line">No sites in view</div>
+            <div class="hud-intel-coverage" id="hud-intel-coverage"></div>
           </div>
         </div>
       </div>
 
       <div class="hud-corner hud-top-right">
         <div class="hud-content" style="text-align:right">
-          <div class="hud-rec"><span id="hud-rec-dot">●</span> REC  <span id="hud-timestamp">2026-01-01 00:00:00Z</span></div>
-          <div class="hud-orbital">ORB: ${this._orbitNum}  PASS: DESC-${this._passNum}</div>
+          <div class="hud-utc" id="hud-timestamp">---------- --:--:--Z</div>
         </div>
-        <div class="hud-bracket">┐</div>
       </div>
 
       <div class="hud-corner hud-bottom-left">
-        <div class="hud-bracket">└</div>
         <div class="hud-content">
-          <div id="hud-mgrs">MGRS: ---</div>
-          <div id="hud-latlon">--°--'--"N ---°--'--"W</div>
+          <div class="hud-coord" id="hud-latlon">--°--'--"N ---°--'--"W</div>
         </div>
       </div>
 
       <div class="hud-corner hud-bottom-right">
         <div class="hud-content" style="text-align:right">
-          <div id="hud-gsd">GSD: --m  NIIRS: --</div>
-          <div id="hud-alt">ALT: --m   SUN: --° EL</div>
-          <div id="hud-ais-vessel" class="hud-ais-vessel">AIS: --</div>
+          <div class="hud-coord" id="hud-alt">ALT: --m   SUN: --° EL</div>
+          <div id="hud-ais-vessel" class="hud-ais-vessel"></div>
         </div>
-        <div class="hud-bracket">┘</div>
-      </div>
-
-      <div class="hud-edge hud-left-edge">
-        <div id="hud-coll">COLL: --:--:--Z</div>
-        <div id="hud-ona">ONA: --°</div>
-      </div>
-
-      <div class="hud-edge hud-right-edge">
-        <div>BAND: PAN</div>
-        <div>BITS: 11</div>
-        <div>LVL: 1A</div>
-      </div>
-
-      <div class="hud-bottom-bar">
-        <span id="hud-bottom-line">LAT: --  LON: --  MGRS: ---</span>
       </div>
     `;
     this._el.dataset.variant = this._variant;
@@ -219,24 +191,105 @@ export class IntelHUD {
       if (el) el.textContent = this._formatUTC();
     }, 1000);
 
-    // REC blink — every 800ms
-    this._recBlinkInterval = setInterval(() => {
-      this._recBlinkState = !this._recBlinkState;
-      const dot = document.getElementById('hud-rec-dot');
-      if (dot) dot.style.visibility = this._recBlinkState ? 'visible' : 'hidden';
-    }, 800);
-
     // Camera-derived data — 4 updates/second (250ms)
     this._updateInterval = setInterval(() => {
       if (!this._visible) return;
       this._updateCameraData();
     }, 250);
 
+    // Portfolio read — cheap, local, no network. Refreshed on the telemetry
+    // cadence rather than the summary's, so it tracks the camera.
+    this._intelInterval = setInterval(() => {
+      if (!this._visible) return;
+      this._updateIntel();
+    }, HUD_INTEL_INTERVAL_MS);
+
     // Semantic summary refresh cadence
     this._summaryInterval = setInterval(() => {
       if (!this._visible) return;
       void this._updateSummary(true);
     }, HUD_SUMMARY_INTERVAL_MS);
+  }
+
+  /**
+   * Install the source of the portfolio read: a zero-argument function
+   * returning a `healthRollup` aggregate (see `portfolio/healthRollup.js`).
+   *
+   * The HUD renders what it is handed and computes no aggregate of its own —
+   * the rollup is the one place that decides what a number rests on, and a
+   * second opinion rendered in a corner would be a second product.
+   *
+   * @param {(() => object|null)|null} fn Rollup source, or null to blank it.
+   */
+  setIntelSource(fn) {
+    this._intelSource = typeof fn === 'function' ? fn : null;
+    this._updateIntel();
+  }
+
+  /**
+   * Repaint the portfolio read.
+   *
+   * Prints the single most decision-relevant measured fact about the sites in
+   * view, and — always, on its own line — the coverage that fact rests on. A
+   * mean congestion score over the two sites that happened to report flow is
+   * the most dangerous output this product has; naming the denominator beside
+   * it is what makes it safe to read at a glance.
+   */
+  _updateIntel() {
+    const wrap = document.getElementById('hud-intel');
+    const lineEl = document.getElementById('hud-intel-line');
+    const covEl = document.getElementById('hud-intel-coverage');
+    if (!wrap || !lineEl) return;
+
+    let rollup = null;
+    try {
+      rollup = this._intelSource ? this._intelSource() : null;
+    } catch {
+      rollup = null;
+    }
+
+    if (!rollup || !rollup.siteCount) {
+      wrap.dataset.state = 'empty';
+      lineEl.textContent = this._intelSource ? 'No sites in view' : 'No portfolio loaded';
+      if (covEl) covEl.textContent = '';
+      return;
+    }
+
+    const t = rollup.traffic || {};
+    const p = rollup.price || {};
+    const n = rollup.siteCount;
+
+    let state = 'ok';
+    let line;
+
+    if (t.corridorClosures > 0) {
+      state = 'alert';
+      const s0 = t.corridorClosures === 1 ? '' : 's';
+      line = `${t.corridorClosures} corridor closure${s0} on approach`;
+    } else if (t.congestedSites > 0) {
+      state = 'caution';
+      const worst = t.worstSite?.name;
+      line = `${t.congestedSites}/${n} congested${worst ? ` — worst ${worst}` : ''}`;
+    } else if (Number.isFinite(p.meanCentsVsAnchor) && p.sitesWithPrice > 0) {
+      const c = p.meanCentsVsAnchor;
+      state = Math.abs(c) >= 5 ? 'caution' : 'ok';
+      line = `mean ${Math.abs(c)}¢ ${c > 0 ? 'above' : 'below'} regional anchor`;
+    } else if (t.sitesWithLiveFlow > 0) {
+      line = `mean congestion ${t.meanCongestionScore}/100, none heavy`;
+    } else {
+      state = 'unmeasured';
+      line = `${n} site${n === 1 ? '' : 's'} — no live road flow measured`;
+    }
+
+    wrap.dataset.state = state;
+    lineEl.textContent = line;
+
+    if (covEl) {
+      const cov = rollup.coverage || {};
+      const flow = Math.round((cov.flowCoverage || 0) * n);
+      const priced = Math.round((cov.priceCoverage || 0) * n);
+      covEl.textContent = `${n} in view · flow ${flow}/${n} · priced ${priced}/${n}`;
+    }
   }
 
   /**
@@ -843,8 +896,8 @@ export class IntelHUD {
   /** Tear down all running intervals. Call when discarding the HUD instance. */
   destroy() {
     clearInterval(this._updateInterval);
-    clearInterval(this._recBlinkInterval);
     clearInterval(this._timestampInterval);
+    clearInterval(this._intelInterval);
     clearInterval(this._summaryInterval);
     clearInterval(this._summaryTypingInterval);
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);

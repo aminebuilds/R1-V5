@@ -256,8 +256,8 @@ let _heatSupported = null;
 let _lastRenderAltitude = 0;
 /**
  * Active post-FX style (StyleManager preset name), synced from
- * `document.documentElement.dataset.gevStyle` at init and the
- * `gev:style-change` window event thereafter. Drives the preset-aware dot
+ * `document.documentElement.dataset.r1Style` at init and the
+ * `r1:style-change` window event thereafter. Drives the preset-aware dot
  * styling (`trafficPresetStyle.js`): NVG/FLIR/noir re-encode congestion in
  * luminance + size (their shaders discard hue), retro/CRT gets saturated
  * hues + a size boost to survive pixelation. 'normal' → shipped palette.
@@ -266,7 +266,7 @@ let _lastRenderAltitude = 0;
 let _stylePreset = 'normal';
 /** @type {'on'|'off'} Kill switch for preset-aware dot styling (A/B). */
 let _presetDots = 'on';
-/** @type {boolean} gev:style-change listener bound (bind once per page). */
+/** @type {boolean} r1:style-change listener bound (bind once per page). */
 let _styleListenerBound = false;
 /**
  * Effective per-bucket dot colors: preset override when one applies, else
@@ -362,7 +362,7 @@ function restyleDotsInPlace() {
 }
 
 /**
- * Adopt a new active style preset (from the gev:style-change event or the
+ * Adopt a new active style preset (from the r1:style-change event or the
  * dataset read at init) and restyle live dots immediately.
  * @param {string|null|undefined} name - StyleManager preset name.
  */
@@ -2176,7 +2176,7 @@ function clearDots() {
 // ─── Data Layer Interface ──────────────────────────────────
 
 /**
- * Traffic data layer — conforms to the God's Eye View data-layer interface.
+ * Traffic data layer — conforms to the R.1 data-layer interface.
  *
  * Lifecycle: init -> enable -> (animate loop + camera-driven loads) -> disable -> destroy.
  * The layer is self-updating: no external tick is needed (`updateInterval: 0`).
@@ -2227,13 +2227,13 @@ const trafficLayer = {
 
     // Preset-aware dot styling: adopt the active post-FX style (persisted
     // style restore may run before layer registration, so read the dataset)
-    // and follow StyleManager's gev:style-change event thereafter. Guarded
+    // and follow StyleManager's r1:style-change event thereafter. Guarded
     // for non-browser contexts; bound once per page (init survives layer
     // destroy/re-register).
     if (typeof window !== 'undefined') {
-      _stylePreset = document?.documentElement?.dataset?.gevStyle || 'normal';
+      _stylePreset = document?.documentElement?.dataset?.r1Style || 'normal';
       if (!_styleListenerBound) {
-        window.addEventListener('gev:style-change', (e) => setStylePreset(e?.detail?.style));
+        window.addEventListener('r1:style-change', (e) => setStylePreset(e?.detail?.style));
         _styleListenerBound = true;
       }
     }

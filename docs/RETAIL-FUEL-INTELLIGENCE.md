@@ -41,7 +41,7 @@ return, callable from a button, a URL parameter, or a voice tool. Voice sits on 
 never load-bearing. If the mic is off, the product still works.
 
 This is already how the existing engines are shaped — `analyzeCompetitivePosition()`,
-`fetchTrafficDelays()`, `evaluateCoolOffOpportunities()` are pure functions; `gevActions.js`
+`fetchTrafficDelays()`, `evaluateCoolOffOpportunities()` are pure functions; `r1Actions.js`
 just dispatches to them. Keep it that way.
 
 ---
@@ -195,7 +195,7 @@ into a sentence:
 | "launch a water-with-fill-up promo" | play library lookup keyed on category × trigger | parameterised, not invented |
 
 The model chooses *which* play and phrases it. It never invents the play, the number, or the
-claim. This is the read/stage/never-autonomous contract from the Banner OS spec, and it is
+claim. This is the read/stage/never-autonomous contract from the R.1 spec, and it is
 what keeps a confident-sounding hallucination from reaching an operator as an instruction.
 
 ---

@@ -91,7 +91,7 @@ async function open(page, { hash = '', query = '', clearAll = true, clearSession
   }
   // The launcher is revealed after the loading cover yields (~T+1.9 s).
   await page.waitForFunction(
-    (sel) => !!window.__godsEyeView?.styleManager
+    (sel) => !!window.__r1?.styleManager
       && (document.querySelector(sel)?.classList.contains('visible') || !document.querySelector(sel)),
     { timeout: 45000 },
     LAUNCHER,
@@ -106,9 +106,9 @@ const launcherVisible = (page) => page.evaluate(
 );
 
 const appState = (page) => page.evaluate(() => {
-  const gev = window.__godsEyeView || {};
-  const sm = gev.styleManager;
-  const dm = gev.dataManager;
+  const r1 = window.__r1 || {};
+  const sm = r1.styleManager;
+  const dm = r1.dataManager;
   const carto = sm?.viewer?.camera?.positionCartographic;
   const layers = {};
   const counts = {};
@@ -129,10 +129,10 @@ const appState = (page) => page.evaluate(() => {
     firmsError: firms?.stats?.error ?? null,
     firmsCount: firms?.stats?.count ?? null,
     detectionOverridden: sm?._detectionUserOverridden ?? null,
-    durable: localStorage.getItem('gev:first-run-mission:v1'),
-    session: sessionStorage.getItem('gev:first-run-mission-session:v1'),
-    layerStateBlob: localStorage.getItem('gev:layer-state:v2'),
-    allocation: localStorage.getItem('gev:detection-allocation:v1'),
+    durable: localStorage.getItem('r1:first-run-mission:v1'),
+    session: sessionStorage.getItem('r1:first-run-mission-session:v1'),
+    layerStateBlob: localStorage.getItem('r1:layer-state:v2'),
+    allocation: localStorage.getItem('r1:detection-allocation:v1'),
   };
 });
 
@@ -179,7 +179,7 @@ async function pick(page, choice, { timeout = 40000, settle = [] } = {}) {
   ).catch(() => {});
   if (settle.length) {
     await page.evaluate(async (ids) => {
-      const dm = window.__godsEyeView?.dataManager;
+      const dm = window.__r1?.dataManager;
       await Promise.all(ids.map((id) => dm?.waitForLayerSettled?.(id)));
     }, settle).catch(() => {});
   }
@@ -226,7 +226,7 @@ async function runArbitrationSection(page, { shots, consoleErrors }) {
         // Real visibility: `display:none` yields zero client rects.
         onScreen: !!node && node.getClientRects().length > 0,
         topmost: !!(hit && node && node.contains(hit)),
-        session: sessionStorage.getItem('gev:first-run-mission-session:v1'),
+        session: sessionStorage.getItem('r1:first-run-mission-session:v1'),
       };
     }, LAUNCHER);
 
@@ -567,7 +567,7 @@ async function main() {
 
       // Share links bypass entirely.
       await open(page, { hash: '#lat=30.2672&lon=-97.7431&alt=2500' });
-      const shareState = await page.evaluate(() => !!window.__godsEyeView?.styleManager?.hasShareState);
+      const shareState = await page.evaluate(() => !!window.__r1?.styleManager?.hasShareState);
       const shareShowed = await launcherVisible(page);
       record('a share link bypasses the launcher', shareState && !shareShowed,
         `hasShareState=${shareState} launcherVisible=${shareShowed}`);

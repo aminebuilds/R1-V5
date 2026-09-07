@@ -290,8 +290,8 @@ function runAllocationProbe(entryCount, profile = 'generic') {
     timeout: 180_000,
     env: {
       ...process.env,
-      GEV_ALLOC_ENTRIES: String(entryCount),
-      GEV_ALLOC_PROFILE: profile,
+      R1_ALLOC_ENTRIES: String(entryCount),
+      R1_ALLOC_PROFILE: profile,
     },
     },
   );

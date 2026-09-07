@@ -18,7 +18,9 @@ import localDataLayers from './data/localLayers.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
-import { initGevVoiceCommands } from './voice/gevRealtime.js';
+import { initR1VoiceCommands } from './voice/r1Realtime.js';
+import { ensureActionRunner } from './voice/r1Actions.js';
+import { initExplainBoard } from './explain/board.js';
 import { MapStackController } from './mapStackController.js';
 import { initAnnotations } from './annotations/index.js';
 import { initLogoGaze } from './logoGaze.js';
@@ -62,7 +64,7 @@ function describeError(error) {
 }
 
 /**
- * GOD'S EYE VIEW — Main Entry Point
+ * R.1 — Main Entry Point
  * Initializes CesiumJS with Google Photorealistic 3D Tiles,
  * style system, intelligence HUD, location presets, and share links.
  */
@@ -196,7 +198,7 @@ async function init() {
       // 'switching'/'ready'/'error'; listeners derive the surface regime from
       // live scene state, so intermediate emissions are harmless.
       onChange: (state) => {
-        window.dispatchEvent(new CustomEvent('gev:map-stack-changed', { detail: state }));
+        window.dispatchEvent(new CustomEvent('r1:map-stack-changed', { detail: state }));
       },
       onError: (message) => console.warn('[MapStack]', message),
     });
@@ -242,11 +244,11 @@ async function init() {
     // Restoration starts only after the complete production registry is sealed.
     dataManager.finalizeRegistrations(LAYER_STATE_REGISTRY);
     if (import.meta.env.DEV) {
-      window.__gevQaRegisterLayer = (targetManager, layerModule) => {
+      window.__r1QaRegisterLayer = (targetManager, layerModule) => {
         if (targetManager !== dataManager) throw new Error('QA layer manager mismatch');
         return dataManager.registerForQa(layerModule);
       };
-      window.__gevQaUnregisterLayer = (targetManager, layerId) => {
+      window.__r1QaUnregisterLayer = (targetManager, layerId) => {
         if (targetManager !== dataManager) throw new Error('QA layer manager mismatch');
         return dataManager.unregisterForQa(layerId);
       };
@@ -348,7 +350,7 @@ async function init() {
     // loop burning behind a hidden tab. (perf wave 2 fix)
     syncVisibilitySuspension();
 
-    window.__godsEyeView = {
+    window.__r1 = {
       viewer,
       styleManager,
       tileset,
@@ -361,10 +363,19 @@ async function init() {
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,
     };
-    window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+    window.__r1.voiceCommands = initR1VoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+
+    // The explain board draws the reasoning behind an answer. It shares the
+    // voice runner rather than making its own, so a typed question and a
+    // spoken one execute exactly the same function — the mic is a second front
+    // door, never the only one.
+    window.__r1.explain = initExplainBoard({
+      viewer,
+      runAction: ensureActionRunner({ viewer, styleManager, dataManager, sceneDirector, annotations }),
+    });
 
   } catch (error) {
-    console.error("God's Eye View initialization failed:", error);
+    console.error("R.1 initialization failed:", error);
     loaderStatus.textContent = `Error: ${describeError(error)}`;
     loaderStatus.style.color = '#ff4444';
   }

@@ -1,5 +1,5 @@
 /**
- * @file Client-side (Phase 0 has no server persistence — see the Banner OS
+ * @file Client-side (Phase 0 has no server persistence — see the R.1
  * spec's hard constraints) storage for the imported `Site[]` portfolio. Its
  * own localStorage key, deliberately separate from
  * `LAYER_STATE_STORAGE_KEY` (`src/data/layerState.js`), which only ever
@@ -8,7 +8,7 @@
  * @module portfolio/portfolioStore
  */
 
-export const PORTFOLIO_STORAGE_KEY = 'gev:banner-os:portfolio:v1';
+export const PORTFOLIO_STORAGE_KEY = 'r1:banner-os:portfolio:v1';
 
 /** Same defensive wrapper idiom as `safeStorage()` in `src/data/layerState.js`. */
 function safeStorage() {

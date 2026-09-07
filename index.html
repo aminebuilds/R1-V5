@@ -353,8 +353,8 @@
           </div>
           <label class="cockpit-radio-volume" for="cockpit-radio-volume">
             <span>VOLUME</span>
-            <input id="cockpit-radio-volume" class="gev-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Cockpit Radio volume" disabled />
-            <output id="cockpit-radio-volume-value" class="gev-slider-value" for="cockpit-radio-volume">80%</output>
+            <input id="cockpit-radio-volume" class="r1-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Cockpit Radio volume" disabled />
+            <output id="cockpit-radio-volume-value" class="r1-slider-value" for="cockpit-radio-volume">80%</output>
           </label>
         </div>
       </div>
@@ -501,7 +501,6 @@
   <div id="command-dock" aria-label="Navigation, voice, and visual preset controls">
   <!-- Control panel -->
   <div id="control-panel" class="panel-collapsible collapsed">
-    <div class="panel-glow"></div>
     <div class="panel-inner">
       <button id="control-panel-toggle" class="panel-header dock-tray-toggle" type="button"
         data-dock-toggle-target="control-panel" aria-expanded="false"
@@ -565,7 +564,6 @@
 
   <!-- Location bar -->
   <div id="location-bar" class="panel-collapsible collapsed">
-    <div class="panel-glow"></div>
     <div class="location-inner">
       <div class="location-toolbar">
         <span class="location-toolbar-label"><span class="dock-label-icon dock-label-icon-location" aria-hidden="true"></span>LOCATION</span>
@@ -596,11 +594,11 @@
   <div id="left-panel-stack">
   <!-- Data Layer Toggle Panel -->
   <div id="data-panel" class="panel-collapsible collapsed active" data-panel-id="data-panel">
-    <div class="panel-glow"></div>
     <div class="data-panel-inner">
       <div class="panel-header">
         <span class="panel-title">DATA LAYERS</span>
         <span class="panel-divider"></span>
+        <span class="panel-state" id="data-panel-state" data-state="idle" role="status" aria-live="polite">Idle</span>
         <button class="panel-collapse-btn" data-collapse-target="data-panel" title="Collapse panel">+</button>
       </div>
       <div id="data-toggles" class="data-toggle-list"></div>
@@ -609,7 +607,6 @@
 
   <!-- CCTV Coverage Panel -->
   <div id="cctv-panel" class="panel-collapsible collapsed" data-panel-id="cctv-panel">
-    <div class="panel-glow"></div>
     <div class="cctv-panel-inner">
       <div class="panel-header">
         <span class="panel-title">CCTV</span>
@@ -665,7 +662,6 @@
 
   <!-- Scene Director Panel -->
   <div id="scene-panel" class="panel-collapsible collapsed" data-panel-id="scene-panel">
-    <div class="panel-glow"></div>
     <div class="scene-panel-inner">
       <div class="panel-header">
         <span class="panel-title">SCENES</span>
@@ -700,9 +696,8 @@
     </div>
   </div>
 
-  <!-- Portfolio Sites Panel (Banner OS Phase 0) -->
+  <!-- Portfolio Sites Panel (R.1 Phase 0) -->
   <div id="sites-panel" class="panel-collapsible collapsed" data-panel-id="sites-panel">
-    <div class="panel-glow"></div>
     <div class="sites-panel-inner">
       <div class="panel-header">
         <span class="panel-title">SITES</span>
@@ -766,7 +761,6 @@
   <!-- Global Context is deliberately independent from the left layer accordion. -->
   <aside id="right-context-rail">
     <div id="global-context-panel" class="panel-collapsible collapsed" data-panel-id="global-context-panel">
-      <div class="panel-glow"></div>
       <div class="global-context-panel-inner">
         <div class="panel-header">
           <span class="panel-title">CONTEXT</span>
@@ -796,8 +790,8 @@
               </div>
               <label class="context-radio-mini-volume" for="context-radio-mini-volume">
                 <span>VOLUME</span>
-                <input id="context-radio-mini-volume" class="gev-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Compact Radio volume" disabled />
-                <output id="context-radio-mini-volume-value" class="gev-slider-value" for="context-radio-mini-volume">80%</output>
+                <input id="context-radio-mini-volume" class="r1-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Compact Radio volume" disabled />
+                <output id="context-radio-mini-volume-value" class="r1-slider-value" for="context-radio-mini-volume">80%</output>
               </label>
             </div>
           </div>
@@ -893,8 +887,8 @@
             </div>
             <label class="radio-volume-row" for="radio-volume">
               <span>VOLUME</span>
-              <input id="radio-volume" class="gev-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Radio volume" />
-              <output id="radio-volume-value" class="gev-slider-value" for="radio-volume">80%</output>
+              <input id="radio-volume" class="r1-quantitative-slider" type="range" min="0" max="100" value="80" aria-label="Radio volume" />
+              <output id="radio-volume-value" class="r1-slider-value" for="radio-volume">80%</output>
             </label>
             <div id="radio-playback-state" class="radio-playback-state" role="status" aria-live="polite">Radio off</div>
             <div class="radio-links">
@@ -972,6 +966,36 @@
 
   <!-- Intelligence HUD Overlay -->
   <div id="intel-hud"></div>
+
+  <!--
+    Explain board — the composed answer surface (src/explain/).
+    Blocks are rendered into #explain-body from a typed document; nothing here
+    is authored per question. Hidden until a question is asked, and collapses
+    to the edge tab rather than disappearing, so the last answer stays reachable.
+  -->
+  <aside id="explain-board" class="xp-board" aria-label="Explanation board" data-scale="rail" hidden>
+    <header class="xp-board-head">
+      <span class="xp-board-label">EXPLAIN</span>
+      <span class="xp-board-rule"></span>
+      <span class="xp-board-run" id="explain-run-state" data-state="idle" role="status" aria-live="polite">Idle</span>
+      <button id="explain-scale" class="xp-icon-btn" type="button" aria-label="Expand board" title="Expand to full board">
+        <span class="material-symbols-outlined" aria-hidden="true">width_wide</span>
+      </button>
+      <button id="explain-close" class="xp-icon-btn" type="button" aria-label="Close explanation board" title="Close">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </header>
+    <form id="explain-ask" class="xp-ask" autocomplete="off">
+      <input id="explain-ask-input" class="xp-ask-input" type="text" placeholder="Ask this view…"
+        aria-label="Ask a question about this view" />
+      <button id="explain-ask-submit" class="xp-ask-btn" type="submit">Ask</button>
+    </form>
+    <div id="explain-steps" class="xp-steps" role="status" aria-live="polite" hidden></div>
+    <div id="explain-body" class="xp-body" data-status="idle"></div>
+  </aside>
+  <button id="explain-reopen" class="xp-reopen" type="button" aria-label="Open explanation board">
+    <span class="xp-reopen-text">EXPLAIN</span>
+  </button>
 
   <!-- Loading screen -->
   <div id="loading-screen">

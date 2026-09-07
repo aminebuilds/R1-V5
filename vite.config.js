@@ -1,5 +1,5 @@
 /**
- * Vite configuration for God's Eye View — a cinematic geospatial app.
+ * Vite configuration for R.1 — a cinematic geospatial app.
  *
  * Registers the dev-server proxy middlewares that bypass CORS and add
  * caching/auth for upstream APIs:
@@ -171,7 +171,7 @@ const OVERPASS_DISK_TTL_MS = 7 * 86_400_000;
  */
 const OVERPASS_BOUNDARY_DISK_TTL_MS = 30 * 86_400_000;
 /** Disk-cache directory for Overpass responses. */
-const OVERPASS_DISK_DIR = path.join(process.cwd(), '.gev-cache', 'overpass');
+const OVERPASS_DISK_DIR = path.join(process.cwd(), '.r1-cache', 'overpass');
 /** Per-upstream fetch timeout (ms). */
 const OVERPASS_TIMEOUT_MS = 22000;
 /** Max entries in the Overpass response cache (LRU-like, oldest evicted first). */
@@ -450,12 +450,12 @@ let _openAiRateLimiter; // undefined = not built yet; null = unlimited; fn = act
 let _googleRateLimiter;
 /** OpenAI cost endpoints (realtime/token + hud-summary). Null = unlimited (default). */
 function openAiRateLimiter() {
-  if (_openAiRateLimiter === undefined) _openAiRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_OPENAI_PER_MIN);
+  if (_openAiRateLimiter === undefined) _openAiRateLimiter = makeOptInRateLimiter(process.env.R1_RATELIMIT_OPENAI_PER_MIN);
   return _openAiRateLimiter;
 }
 /** Google cost endpoint (nearby-places). Null = unlimited (default). */
 function googleRateLimiter() {
-  if (_googleRateLimiter === undefined) _googleRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_GOOGLE_PER_MIN);
+  if (_googleRateLimiter === undefined) _googleRateLimiter = makeOptInRateLimiter(process.env.R1_RATELIMIT_GOOGLE_PER_MIN);
   return _googleRateLimiter;
 }
 
@@ -746,7 +746,7 @@ const RADIO_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 const RADIO_DIRECTORY_LIMIT = 750;
 const RADIO_CATALOG_MIN_SUCCESSFUL_QUERIES = 5;
 const RADIO_CATALOG_HEALTHY_MIN_STATIONS = Math.ceil(RADIO_DIRECTORY_LIMIT / 2);
-const RADIO_USER_AGENT = 'GodsEyeView/1.0 (Radio Browser directory client)';
+const RADIO_USER_AGENT = 'R1/1.0 (Radio Browser directory client)';
 const RADIO_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RADIO_FALLBACK_MIRRORS = Object.freeze([
   'https://de1.api.radio-browser.info',
@@ -1324,7 +1324,7 @@ const OPENAI_REALTIME_REASONING_DEFAULT = 'low';
 const OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT = 16000;
 const OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT = 0.95;
 const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
-const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.gev-logs');
+const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.r1-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
 const REALTIME_DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -1497,7 +1497,7 @@ function buildOpenSkyHeaders({ cacheStatus, requestedMode, usedMode, reason, sta
  */
 function celestrakProxy() {
   const TLE_TTL_MS = 6 * 3600_000;
-  const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  const CACHE_DIR = path.join(process.cwd(), '.r1-cache');
   const mem = new Map(); // group -> { at: epochMs, body: string }
   const inflight = new Map(); // group -> Promise<{at, body}|null>
 
@@ -1528,7 +1528,7 @@ function celestrakProxy() {
       signal: AbortSignal.timeout(20000),
       // CelesTrak 403s bulk groups (e.g. `active`) unless the request carries a
       // descriptive User-Agent with a contact point.
-      headers: { 'User-Agent': 'gods-eye-view-celestrak-proxy/1.0 (+https://github.com/aminebuilds/gods-eye-view-world)' },
+      headers: { 'User-Agent': 'r1-celestrak-proxy/1.0 (+https://github.com/aminebuilds/R1-V5)' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.text();
@@ -1612,7 +1612,7 @@ function rocketLaunchesProxy() {
   const ttlMs = LL2_CACHE_TTL_MS;
   const maxResponseBytes = 12 * 1024 * 1024;
   const maxDiskCacheBytes = 24 * 1024 * 1024;
-  const cachePath = path.join(process.cwd(), '.gev-cache', 'launch-library-2-v2.3.json');
+  const cachePath = path.join(process.cwd(), '.r1-cache', 'launch-library-2-v2.3.json');
   let cache = null;
   let diskLoaded = false;
   const inFlight = new Map();
@@ -1644,7 +1644,7 @@ function rocketLaunchesProxy() {
     res.writeHead(status, {
       'Content-Type': 'application/json',
       'Cache-Control': status === 200 ? 'public, max-age=900' : 'no-store',
-      'X-GEV-Cache': cacheState,
+      'X-R1-Cache': cacheState,
     });
     res.end(body);
   }
@@ -1728,12 +1728,12 @@ function rocketLaunchesProxy() {
  * "Traffic flow"). The key comes from TOMTOM_API_KEY server-side only — the
  * browser fetches same-origin `/api/tomtom/flow/{z}/{x}/{y}.pbf`.
  *
- * Cache: memory + disk (.gev-cache/tomtom/), TTL 120 s (traffic is fresh
+ * Cache: memory + disk (.r1-cache/tomtom/), TTL 120 s (traffic is fresh
  * data), single-flight per tile, serve-stale-on-failure — the celestrakProxy
  * pattern. Cache hits never count against the budget.
  *
  * Budget governor (mirrors the OpenSky credit-governor philosophy — last-good
- * data beats a dead layer): a persistent counter (.gev-cache/tomtom/budget.json,
+ * data beats a dead layer): a persistent counter (.r1-cache/tomtom/budget.json,
  * keyed by UTC date, reset on day change) counts upstream fetch attempts
  * against a soft cap (TOMTOM_DAILY_TILE_BUDGET, default 40,000 of the free
  * tier's ~50k/day). Over the cap the proxy serves stale tiles when available,
@@ -1747,7 +1747,7 @@ function rocketLaunchesProxy() {
  */
 function tomtomProxy() {
   const TILE_TTL_MS = 120_000;
-  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'tomtom');
+  const CACHE_DIR = path.join(process.cwd(), '.r1-cache', 'tomtom');
   const BUDGET_PATH = path.join(CACHE_DIR, 'budget.json');
   const DEFAULT_DAILY_BUDGET = 40000;
   const MEM_MAX_ENTRIES = 256;
@@ -1960,7 +1960,7 @@ function tomtomProxy() {
  * clamps to the trailing 24 h via src/data/firmsCsv.js. FIRMS quota is
  * 5,000 transactions / 10 min per MAP_KEY, so the cache is the point:
  * TTL 30 min, single-flight refresh, serve-stale-on-failure, and a
- * fresh-enough disk cache (.gev-cache/firms.json) prevents ANY upstream
+ * fresh-enough disk cache (.r1-cache/firms.json) prevents ANY upstream
  * fetch across dev-server restarts. Pattern mirrors celestrakProxy.
  *
  * Routes:
@@ -1976,7 +1976,7 @@ function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
   const SOURCES = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
-  const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  const CACHE_DIR = path.join(process.cwd(), '.r1-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'firms.json');
 
   /** @type {?{at: number, sources: Array<object>, fires: Array<object>}} */
@@ -2182,7 +2182,7 @@ function firmsProxy() {
  */
 function terrainHeightsProxy() {
   const TTL_MS = 30 * 24 * 3600_000;
-  const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  const CACHE_DIR = path.join(process.cwd(), '.r1-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'terrain-heights.json');
   const UPSTREAM_CHUNK = 256;
   const MAX_POINTS = 2000;
@@ -2330,7 +2330,7 @@ function terrainHeightsProxy() {
  */
 function adsbdbProxy() {
   const TTL_MS = 24 * 3600_000;
-  const CACHE_PATH = path.join(process.cwd(), '.gev-cache', 'adsbdb.json');
+  const CACHE_PATH = path.join(process.cwd(), '.r1-cache', 'adsbdb.json');
   let cache = { routes: {}, aircraft: {} };
   let dirty = false;
   let loaded = false;
@@ -2521,7 +2521,7 @@ async function fetchOverpassPayload(body, maxResponseBytes = OVERPASS_MAX_RESPON
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'gods-eye-view-overpass-proxy/1.0',
+          'User-Agent': 'r1-overpass-proxy/1.0',
         },
         body,
         signal: controller.signal,
@@ -2764,7 +2764,7 @@ function overpassProxy() {
           try {
             const upstreamRes = await fetch(upstream, {
               signal: controller.signal,
-              headers: { 'User-Agent': 'gods-eye-view/dev (local)' },
+              headers: { 'User-Agent': 'r1/dev (local)' },
             });
             if (!upstreamRes.ok) return fail('no route found');
             const ctype = upstreamRes.headers.get('content-type') || '';
@@ -2826,7 +2826,7 @@ async function fetchAdsbLolPointFallback(req) {
         {
           headers: {
             Accept: 'application/json',
-            'User-Agent': 'gods-eye-view-adsblol-regional-fallback/1.0',
+            'User-Agent': 'r1-adsblol-regional-fallback/1.0',
           },
           signal: controller.signal,
         },
@@ -3306,7 +3306,7 @@ function gbfsProxy() {
               method: 'GET',
               headers: {
                 Accept: 'application/json',
-                'User-Agent': 'gods-eye-view-gbfs-proxy/1.0',
+                'User-Agent': 'r1-gbfs-proxy/1.0',
               },
               signal: controller.signal,
             });
@@ -4382,7 +4382,7 @@ export async function fetchCctvImageFromUpstream(url, {
   }, timeoutMs);
   try {
     const upstream = await fetchImpl(url, {
-      headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
+      headers: { 'User-Agent': 'r1-cctv-proxy/1.0' },
       signal: controller.signal,
     });
     const contentType = upstream.headers.get('content-type') || '';
@@ -4472,7 +4472,7 @@ function cctvProxy() {
       sv.searchParams.set('key', streetViewKey);
 
       const svResp = await fetch(sv.toString(), {
-        headers: { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' },
+        headers: { 'User-Agent': 'r1-cctv-proxy/1.0' },
         signal: AbortSignal.timeout(CCTV_FRAME_FETCH_TIMEOUT_MS),
       });
       const svType = svResp.headers.get('content-type') || '';
@@ -4559,7 +4559,7 @@ function cctvProxy() {
             }
 
             try {
-              const upstreamHeaders = { 'User-Agent': 'gods-eye-view-cctv-proxy/1.0' };
+              const upstreamHeaders = { 'User-Agent': 'r1-cctv-proxy/1.0' };
               const requestRange = req.headers?.range;
               if (requestRange) upstreamHeaders.Range = requestRange;
               const upstream = await fetch(mediaUrl, {
@@ -4724,7 +4724,7 @@ function adsbLolProxy() {
             return;
           }
           const upstream = await fetch('https://api.adsb.lol/v2/mil', {
-            headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
+            headers: { 'User-Agent': 'r1-adsblol-proxy/1.0' },
           });
           const body = await upstream.text();
           if (upstream.ok) {
@@ -4967,7 +4967,7 @@ function openAiRealtimeProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
+      // Opt-in per-IP throttle (R1_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
       if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
 
       const apiKey = process.env.OPENAI_API_KEY;
@@ -4990,7 +4990,7 @@ function openAiRealtimeProxy() {
           body: JSON.stringify({
             model: process.env.OPENAI_HUD_SUMMARY_MODEL || OPENAI_HUD_SUMMARY_MODEL_DEFAULT,
             instructions: [
-              "Write one concise intelligence-HUD summary for God's Eye View.",
+              "Write one concise intelligence-HUD summary for R.1.",
               'Use only the supplied place, street, nearby-place, and enabled-layer text labels.',
               'Prefer the clearest named place and include a relevant enabled layer only when useful.',
               'Do not infer from coordinates or invent a place.',
@@ -5050,7 +5050,7 @@ function openAiRealtimeProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
+      // Opt-in per-IP throttle (R1_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
       if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
 
       const apiKey = process.env.OPENAI_API_KEY;
@@ -5114,13 +5114,13 @@ function openAiRealtimeProxy() {
             output: { voice },
           },
           instructions: [
-            "You are GEV Voice Control, a concise voice controller for a Cesium geospatial app called God's Eye View.",
+            "You are R1 Voice Control, a concise voice controller for a Cesium geospatial app called R.1.",
             'Have a natural spoken conversation with the user while the mic session is active.',
             'Retain strong conversational memory across all user turns in this session. When the user refers to previously mentioned locations, stores, traffic conditions, competitors, questions, or sites (e.g. "go there", "what about the other one?", "how is that one doing?"), use your dialogue history to resolve their intent accurately.',
-            'Do not require a wake phrase. Treat direct commands like "zoom into London" or "open datacenters" as GEV control requests.',
+            'Do not require a wake phrase. Treat direct commands like "zoom into London" or "open datacenters" as R1 control requests.',
             'Only control the app by calling the provided tools. Never invent tool names or arguments.',
-            'Call tools only for clear GEV control, navigation, visual-style, layer, or app-state requests. For ordinary conversation, answer normally without tools.',
-            'You act as a capable assistant, not a command parser: you have direct control over every world data layer (aircraft, ships, fires, quakes, satellites, traffic, CCTV, radio), camera and navigation, visual styles and panels, natural-language analysis over loaded data, map annotation, scene playback, and the Banner OS portfolio tools (importing sites, searching a business by name, and per-site weather/traffic briefs). Translate the user\'s plain intent into the right tool call(s) even when their phrasing is vague, informal, or names no feature by its tool name — the user should never need to know a command to get value from you.',
+            'Call tools only for clear R1 control, navigation, visual-style, layer, or app-state requests. For ordinary conversation, answer normally without tools.',
+            'You act as a capable assistant, not a command parser: you have direct control over every world data layer (aircraft, ships, fires, quakes, satellites, traffic, CCTV, radio), camera and navigation, visual styles and panels, natural-language analysis over loaded data, map annotation, scene playback, and the R.1 portfolio tools (importing sites, searching a business by name, and per-site weather/traffic briefs). Translate the user\'s plain intent into the right tool call(s) even when their phrasing is vague, informal, or names no feature by its tool name — the user should never need to know a command to get value from you.',
             'For requests to open, show, reveal, or focus a menu/panel, call set_panel_open or show_data_layers_menu. "Open Context" means only set_panel_open{panelId:"global-context-panel",open:true}; it does not activate a Context sub-mode. "Open Contacts" means set_context_mode{mode:"contacts"}; that action expands the parent Context panel before activating Contacts.',
             'For requests like "show me the datacenter layers", open the data layers menu and focus the matching layer row; do not enable the layer unless the user asks to turn it on.',
             'For questions like "what am I looking at?", "what is in view?", "what is this?", "that selected thing", nearby datacenter, dam, cable, ship, or current view contents, call get_entity_context first, then answer from the returned scene/entity context.',
@@ -5155,7 +5155,7 @@ function openAiRealtimeProxy() {
             // infrastructure tile at all. See src/firstRunExperience.js for why.
             //
             // Fully expressible with tools that already exist, so
-            // GEV_REALTIME_TOOLS is deliberately untouched — deleting this one
+            // R1_REALTIME_TOOLS is deliberately untouched — deleting this one
             // string is the whole rollback.
             'NAMED VIEWS are shorthand for tool calls you already have — there is no "mode" tool for them. Treat ONLY these as the shorthand: "infrastructure mode" / "the infrastructure view" / "show me global infrastructure" means three set_layer_visibility calls (local-datacenters, local-dams, telegeography-submarine-cables) plus zoom_to_globe; "environmental mode" / "earth watch" / "active events", said as the name of a view, means set_layer_visibility for local-firms and earthquakes plus zoom_to_globe. Anything vaguer is NOT this shorthand — an open-ended question about the world or the news is an ordinary question: answer it, or use analyst_query over the layers already on. Never switch a whole view on to answer a question nobody asked to see. When you do run one, make every call before speaking, then give one confirmation naming the resulting state; if the fires layer comes back unavailable because no FIRMS key is configured, say so plainly — the earthquakes still loaded. "Live contacts" and "space missions" are NOT this pattern: they stay set_context_mode{mode:"contacts"} and set_context_mode{mode:"space-missions"}.',
             'For visual filter requests, call set_visual_style with one of the allowed style IDs.',
@@ -5178,7 +5178,7 @@ function openAiRealtimeProxy() {
             'Confirmations echo the RESULTING state, never the request: "HUD operator layout", "Density twenty-five percent", "Bing aerial imagery", "Tracking UAL428", "Framed fourteen aircraft". On ok=false, state the failure plainly: "Nothing matched UAL999", "No ships within 120 kilometers". Never claim an action without ok=true in the tool result.',
             'For destination requests such as "take me to Italy", "go to NYC", or "show me the Eiffel Tower", call fly_to_location. Prefer known city IDs when available; otherwise pass the plain place query.',
             'Navigation-only requests ("take me to X", "go to X", "fly to X") are NOT descriptions: call fly_to_location alone and do NOT also call annotate_map, unless the user explicitly asks to mark the place or you go on to explain specific places there. Never drop a point pin on a region-scale natural feature (a mountain range, desert, sea, or forest) — a single point in the middle of the Rockies is meaningless. If the user explicitly asks to mark such a region, prefer type=area.',
-            'For country and city destinations, omit rangeM so GEV frames the whole country or city in view. For landmarks and buildings, omit rangeM so GEV chooses a close landmark view.',
+            'For country and city destinations, omit rangeM so R1 frames the whole country or city in view. For landmarks and buildings, omit rangeM so R1 chooses a close landmark view.',
             'Only supply rangeM when the user asks for a particular numeric height, distance, closer view, or wider view.',
             'For relative requests such as "zoom out a little", "pull back", "zoom in more", or "get closer", always call adjust_camera_zoom. But "globe view", "whole earth", "the whole planet", or "zoom all the way out" is an ABSOLUTE framing: call zoom_to_globe once instead — repeated adjust_camera_zoom calls can never reach the globe. Never claim the camera moved without the tool returning ok=true.',
             'Keep spoken confirmations short, e.g. "Opening datacenters" or "Flying to London".',
@@ -5189,7 +5189,7 @@ function openAiRealtimeProxy() {
             'PREFER NAMES. Only when you cannot name or geocode a place but you can clearly SEE the exact spot in the most recent viewport screenshot, fall back to screenX/screenY (normalized 0..1 from that image) to point at it; the app converts the pixel to a real world point. Never use screenX/screenY for something you could name.',
             'PATHS vs DISTANCES: for "walking/driving route from A to B" (or through several stops), use type=route with the ordered points and the matching mode (walking/driving/cycling) — the app draws the real street-following path on the map and reports distance and travel time, which you can read aloud. For "how far is X from Y", "is it nearby", or "X is next to Y", use type=arrow between the two — it draws a floating connector and shows the straight-line distance. Do NOT use route for a simple distance/proximity question.',
           ].join('\n'),
-          tools: GEV_REALTIME_TOOLS,
+          tools: R1_REALTIME_TOOLS,
           tool_choice: 'auto',
         },
       };
@@ -5200,7 +5200,7 @@ function openAiRealtimeProxy() {
           headers: {
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'OpenAI-Safety-Identifier': 'gev-local-dev',
+            'OpenAI-Safety-Identifier': 'r1-local-dev',
           },
           body: JSON.stringify(sessionConfig),
         });
@@ -5211,10 +5211,10 @@ function openAiRealtimeProxy() {
         // body is passed through untouched (the client parses it verbatim), so
         // these headers are the authoritative echo — including the case where a
         // bogus ?tier= was silently downgraded to standard.
-        res.setHeader('X-GEV-Voice-Tier', tier);
-        res.setHeader('X-GEV-Voice-Model', model);
+        res.setHeader('X-R1-Voice-Tier', tier);
+        res.setHeader('X-R1-Voice-Model', model);
         if (requestedTier && !isKnownVoiceTier(requestedTier)) {
-          res.setHeader('X-GEV-Voice-Tier-Fallback', '1');
+          res.setHeader('X-R1-Voice-Tier-Fallback', '1');
         }
         res.end(body);
       } catch (error) {
@@ -5293,7 +5293,7 @@ function googlePlacesContextProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_GOOGLE_PER_MIN). No-op when unset.
+      // Opt-in per-IP throttle (R1_RATELIMIT_GOOGLE_PER_MIN). No-op when unset.
       // Inlined (not the shared helper) so the 429 body keeps this endpoint's
       // `places: []` contract that the client expects on every error response.
       const _grl = googleRateLimiter();
@@ -5407,7 +5407,7 @@ function googlePlacesContextProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_GOOGLE_PER_MIN). No-op when unset.
+      // Opt-in per-IP throttle (R1_RATELIMIT_GOOGLE_PER_MIN). No-op when unset.
       // Inlined (like nearby-places) so the 429 body keeps the `places: []`
       // contract the client expects on every error response.
       const _grl = googleRateLimiter();
@@ -5543,11 +5543,11 @@ function approximateDistanceM(latA, lonA, latB, lonB) {
   ));
 }
 
-const GEV_REALTIME_TOOLS = [
+const R1_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'fly_to_location',
-    description: "Fly the God's Eye View camera to a known city, geocoded country/region/city/landmark, or explicit WGS84 coordinate. Countries/cities frame the whole place; landmarks/buildings use close framing.",
+    description: "Fly the R.1 camera to a known city, geocoded country/region/city/landmark, or explicit WGS84 coordinate. Countries/cities frame the whole place; landmarks/buildings use close framing.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -5566,7 +5566,7 @@ const GEV_REALTIME_TOOLS = [
         viewMode: {
           type: 'string',
           enum: ['close', 'overview'],
-          description: 'Optional framing intent. Usually omit this; GEV infers whole-place framing for countries/cities and close framing for landmarks.',
+          description: 'Optional framing intent. Usually omit this; R1 infers whole-place framing for countries/cities and close framing for landmarks.',
         },
         rangeM: {
           type: 'number',
@@ -5644,7 +5644,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'set_layer_visibility',
-    description: "Enable or disable one registered God's Eye View data layer.",
+    description: "Enable or disable one registered R.1 data layer.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -5708,7 +5708,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'set_panel_open',
-    description: 'Open or close a GEV UI panel/dropdown.',
+    description: 'Open or close a R1 UI panel/dropdown.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -5768,7 +5768,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'set_visual_style',
-    description: "Set the active God's Eye View visual filter/style.",
+    description: "Set the active R.1 visual filter/style.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -5784,7 +5784,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'get_entity_context',
-    description: 'Get current GEV scene context, including basemap/3D-tile target context, selected entity metadata if active, and entities currently visible in the camera view.',
+    description: 'Get current R1 scene context, including basemap/3D-tile target context, selected entity metadata if active, and entities currently visible in the camera view.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -6168,7 +6168,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'search_business_sites',
-    description: "Search for a business/brand by name near the current camera view (or an explicit location) and add every matching location to the operator's Banner OS site portfolio (the SITES panel). Use this when the user says things like 'I'm/we're <business name>', 'add my <business> locations', or 'find <business> near here'. This searches NEARBY matches only (Google Places, not a nationwide chain locator) — it will not find every location of a business across the whole country in one call, only what's near the current or given view.",
+    description: "Search for a business/brand by name near the current camera view (or an explicit location) and add every matching location to the operator's R.1 site portfolio (the SITES panel). Use this when the user says things like 'I'm/we're <business name>', 'add my <business> locations', or 'find <business> near here'. This searches NEARBY matches only (Google Places, not a nationwide chain locator) — it will not find every location of a business across the whole country in one call, only what's near the current or given view.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -6183,7 +6183,7 @@ const GEV_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'activate_network',
-    description: "The primary Banner OS entry point — use this instead of search_business_sites whenever the user wants analysis, not just pins on the map. Say things like 'activate <business>', 'run this for <business>', 'pull up <business>'s network', or 'what should I look at for <business>' trigger it. It searches for the business/brand near the current camera view (same NEARBY-only Google Places search as search_business_sites — not an exhaustive nationwide chain locator), adds every match to the operator's portfolio, computes a ranked dollar-gap queue across the WHOLE portfolio (every site added so far, not just this search), renders that queue in the SITES panel, and flies the camera to the single biggest modeled opportunity. The gap numbers in the result are a PLACEHOLDER model — deterministic but synthetic, not derived from real traffic, POS, or demographic data yet. Always describe them to the user as modeled/illustrative, never as measured or real; if asked how confident the numbers are, say plainly that this is a placeholder pending real data.",
+    description: "The primary R.1 entry point — use this instead of search_business_sites whenever the user wants analysis, not just pins on the map. Say things like 'activate <business>', 'run this for <business>', 'pull up <business>'s network', or 'what should I look at for <business>' trigger it. It searches for the business/brand near the current camera view (same NEARBY-only Google Places search as search_business_sites — not an exhaustive nationwide chain locator), adds every match to the operator's portfolio, computes a ranked dollar-gap queue across the WHOLE portfolio (every site added so far, not just this search), renders that queue in the SITES panel, and flies the camera to the single biggest modeled opportunity. The gap numbers in the result are a PLACEHOLDER model — deterministic but synthetic, not derived from real traffic, POS, or demographic data yet. Always describe them to the user as modeled/illustrative, never as measured or real; if asked how confident the numbers are, say plainly that this is a placeholder pending real data.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -6759,7 +6759,7 @@ export const MILITARY_INSTALLATION_ELEMENT_CAP = 700;
  */
 const MILITARY_INSTALLATION_DISK_TTL_MS = 30 * 86_400_000;
 /** Disk-cache directory for mapped installation payloads. */
-const MILITARY_INSTALLATION_DISK_DIR = path.join(process.cwd(), '.gev-cache', 'military-installations');
+const MILITARY_INSTALLATION_DISK_DIR = path.join(process.cwd(), '.r1-cache', 'military-installations');
 /**
  * Cache-key grid step in degrees (~5.5 km).
  *
@@ -7209,8 +7209,8 @@ function fetchRegionalPlace(point) {
     });
     const payload = await fetchRegionalJson(`https://nominatim.openstreetmap.org/reverse?${params}`, {
       headers: {
-        'User-Agent': 'GodsEyeView/0.1 (+https://github.com/aminebuilds/gods-eye-view-world)',
-        Referer: 'https://github.com/aminebuilds/gods-eye-view-world',
+        'User-Agent': 'R1/0.1 (+https://github.com/aminebuilds/R1-V5)',
+        Referer: 'https://github.com/aminebuilds/R1-V5',
       },
     });
     return normalizeRegionalPlace(payload);
@@ -7230,7 +7230,7 @@ async function fetchRegionalNews(place) {
   });
   try {
     const xml = await fetchRegionalText(`https://news.google.com/rss/search?${rssParams}`, {
-      headers: { 'User-Agent': 'GodsEyeView/0.1' },
+      headers: { 'User-Agent': 'R1/0.1' },
       timeoutMs: 12_000,
     });
     const articles = normalizeRssArticles(xml, 5);
@@ -7246,7 +7246,7 @@ async function fetchRegionalNews(place) {
   });
   try {
     const payload = await fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
-      headers: { 'User-Agent': 'GodsEyeView/0.1' },
+      headers: { 'User-Agent': 'R1/0.1' },
       timeoutMs: 12_000,
     });
     const articles = normalizeRegionalArticles(payload, 5);
