@@ -32,6 +32,16 @@ How to read this:
 | **Google News RSS** | Primary locality-matched headlines in the cockpit Regional News page | [Google News Terms of Service](https://www.google.com/intl/en_us/terms_google_news.html) restrict use to personal, noncommercial use; linked articles remain third-party publisher content and retain publisher terms | "Google News RSS" plus each article's linked publisher/domain |
 | **GDELT Project DOC 2.0** | Fail-soft fallback for location-matched cockpit headlines | [GDELT Terms of Use](https://www.gdeltproject.org/about.html#termsofuse): unrestricted academic/commercial/governmental dataset use, with citation and link required; linked articles retain publisher terms | "GDELT Project" plus each article's linked publisher/domain |
 | **City of Austin Open Data** | CCTV camera catalog + frames | City of Austin Open Data Terms of Use | "City of Austin, TX — data.austintexas.gov" |
+| **U.S. Energy Information Administration (EIA) Open Data v2** | Regional weekly retail gasoline prices (the price anchor) and daily crude spot (WTI/Brent) — the series the fuel pass-through model is fitted and backtested on (optional, free key) | US Government work, public domain; [EIA Open Data](https://www.eia.gov/opendata/) requests citation | "U.S. Energy Information Administration (EIA)" |
+| **Ministerio para la Transición Ecológica y el Reto Demográfico (Spain)** | Official station-level fuel prices for ~11,000 Spanish service stations (keyless) | Spanish open-data reuse terms ([geoportalgasolineras.es](https://geoportalgasolineras.es)) | "Ministerio para la Transición Ecológica y el Reto Demográfico (geoportalgasolineras.es)" |
+| **prix-carburants / data.gouv.fr (France)** | Official station-level fuel prices for French stations (keyless) | [Licence Ouverte / Open Licence](https://www.etalab.gouv.fr/licence-ouverte-open-licence) | "Ministère de l'Économie — prix-carburants.gouv.fr (Licence Ouverte)" |
+
+**No US station-level price feed is wired, deliberately.** GasBuddy and OPIS
+license their per-station data commercially and publish no free API; every
+"free" alternative found is a scraper operating against a site's terms of
+service. Shipping one would breach those terms and put fabricated-provenance
+prices on the map. The supported US paths are the EIA regional anchor above
+(published, free, public domain) and the operator's own price book.
 | **Caltrans (cwwp2.dot.ca.gov)** | CCTV camera catalogs + frames, California districts | Public Caltrans traffic camera data | "Caltrans — cwwp2.dot.ca.gov" (courtesy) |
 | **TfL Open Data (JamCams)** | CCTV camera catalog + frames, London | [TfL Open Data terms](https://tfl.gov.uk/info-for/open-data-users/) — attribution REQUIRED | "Powered by TfL Open Data. Contains OS data © Crown copyright and database rights" |
 | **GBFS (Lyft / BCycle)** | Bikeshare availability | Per-feed (attribution-only) | Credit the operator (e.g. Austin BCycle) + its `license_url` |

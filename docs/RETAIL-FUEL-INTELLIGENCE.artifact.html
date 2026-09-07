@@ -1,0 +1,642 @@
+<title>Retail &amp; Fuel Intelligence</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap">
+<style>
+/* ── V5 token block (docs/DESIGN-V5.md §06). Single-theme by design:
+      this document is rendered in the instrument system it specifies. ── */
+:root{
+  --bg-dark:#06080A; --plate:#0D1216; --plate-hi:#121A20; --plate-top:#18222A; --plate-sunk:#04070A;
+  --line:#1C242B; --border:#2E3941; --border-hover:#3A4750;
+  --ink:#E4EAEE; --ink-2:#8B98A3; --ink-dim:#5A6670; --ink-ghost:#39434B;
+  --signal:#62E0A8; --signal-sunk:#0E2A21;
+  --caution:#F2B33D; --caution-sunk:#2C2110;
+  --alert:#FF6A45; --alert-sunk:#2E1409;
+  --vertical:#36DCFF;            /* fuel-convenience, industryOntology.js */
+  --vertical-sunk:#08262E;
+  --sans:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px; --s12:48px; --s18:72px;
+}
+*{box-sizing:border-box;}
+body{background:var(--bg-dark);color:var(--ink);font-family:var(--sans);
+  font-size:13.5px;line-height:1.62;-webkit-font-smoothing:antialiased;}
+:where(h1,h2,h3,h4,p,ul,ol,table,pre,figure){margin:0;}
+a{color:var(--vertical);text-decoration:none;border-bottom:1px solid var(--vertical-sunk);}
+a:hover{border-bottom-color:var(--vertical);}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--vertical);outline-offset:2px;}
+code,.num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+
+/* ── Frame: fixed index rail + measured column. Elements have addresses. ── */
+.shell{display:grid;grid-template-columns:212px minmax(0,1fr);gap:0;
+  max-width:1180px;margin:0 auto;align-items:start;}
+.rail{position:sticky;top:0;align-self:start;padding:var(--s8) var(--s4) var(--s8) var(--s6);
+  border-right:1px solid var(--line);height:100vh;overflow-y:auto;}
+.main{padding:var(--s8) var(--s8) var(--s18) var(--s8);min-width:0;}
+
+/* ── Type roles, V5 §04 ── */
+.label{font-family:var(--mono);font-weight:500;font-size:10px;letter-spacing:.20em;
+  text-transform:uppercase;color:var(--ink-dim);}
+.micro{font-family:var(--mono);font-weight:500;font-size:9px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--ink-ghost);}
+h1{font-weight:600;font-size:30px;letter-spacing:-.028em;line-height:1.05;text-wrap:balance;}
+h2{font-weight:600;font-size:18px;letter-spacing:-.014em;line-height:1.2;text-wrap:balance;}
+h3{font-weight:600;font-size:13px;letter-spacing:-.005em;line-height:1.3;}
+p{max-width:66ch;}
+strong{font-weight:600;color:var(--ink);}
+em{font-style:normal;color:var(--vertical);}
+
+/* ── Rail index ── */
+.rail-brand{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:var(--s6);}
+.rail-brand .mark{font-family:var(--mono);font-weight:600;font-size:15px;color:var(--ink);
+  letter-spacing:-.02em;}
+.rail-brand .mark span{color:var(--vertical);}
+.toc{display:flex;flex-direction:column;gap:0;margin-top:var(--s3);
+  border-top:1px solid var(--line);}
+.toc a{display:grid;grid-template-columns:22px 1fr;gap:var(--s2);align-items:baseline;
+  padding:7px 0;border:0;border-bottom:1px solid var(--line);color:var(--ink-2);
+  font-size:11.5px;line-height:1.3;}
+.toc a:hover{color:var(--ink);background:var(--plate);}
+.toc a .n{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-ghost);}
+.rail-foot{margin-top:var(--s6);display:flex;flex-direction:column;gap:var(--s1);}
+
+/* ── Masthead ── */
+.masthead{border-bottom:1px solid var(--border);padding-bottom:var(--s6);margin-bottom:var(--s8);}
+.eyebrow{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s3);}
+.thesis{border-left:2px solid var(--vertical);background:var(--plate);
+  padding:var(--s4) var(--s4) var(--s4) var(--s6);margin-top:var(--s6);}
+.thesis p{color:var(--ink-2);max-width:64ch;}
+.thesis p+p{margin-top:var(--s3);}
+
+/* ── Meta grid: label/value pairs, one object ── */
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);margin-top:var(--s6);}
+.meta div{background:var(--bg-dark);padding:var(--s3) var(--s4);display:flex;
+  flex-direction:column;gap:3px;}
+.meta .v{font-size:12px;color:var(--ink);line-height:1.35;}
+
+/* ── Sections ── */
+section{margin-top:var(--s12);scroll-margin-top:var(--s4);}
+.sec-head{display:flex;align-items:baseline;gap:var(--s3);
+  border-bottom:1px solid var(--border);padding-bottom:var(--s2);margin-bottom:var(--s6);}
+.sec-head .n{font-family:var(--mono);font-size:10px;letter-spacing:.20em;color:var(--vertical);}
+section>p+p,section>p+.plate,section>*+p{margin-top:var(--s4);}
+h3{margin-top:var(--s6);margin-bottom:var(--s2);}
+h3+p{margin-top:0;}
+
+/* ── Plate: the one container. Depth is a value step, not a shadow. ── */
+.plate{background:var(--plate);border:1px solid var(--line);padding:var(--s4);border-radius:2px;}
+.plate-hi{background:var(--plate-hi);}
+
+/* ── Tables: full-bleed data, scroll in their own container ── */
+.tw{overflow-x:auto;margin-top:var(--s4);border:1px solid var(--line);border-radius:2px;}
+table{border-collapse:collapse;width:100%;font-size:12px;min-width:520px;}
+th{font-family:var(--mono);font-weight:500;font-size:9px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--ink-dim);text-align:left;
+  padding:var(--s2) var(--s3);background:var(--plate-hi);border-bottom:1px solid var(--border);
+  white-space:nowrap;}
+td{padding:9px var(--s3);border-bottom:1px solid var(--line);color:var(--ink-2);
+  vertical-align:top;line-height:1.45;}
+tr:last-child td{border-bottom:0;}
+tbody tr:hover td{background:var(--plate);}
+td strong,td b{color:var(--ink);font-weight:500;}
+td code{font-size:11px;color:var(--ink-2);}
+
+/* ── Confidence chips: the taxonomy the whole document turns on ── */
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-weight:500;
+  font-size:9px;letter-spacing:.20em;text-transform:uppercase;padding:2px 7px;border-radius:2px;
+  border:1px solid;white-space:nowrap;}
+.chip::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor;}
+.ok{color:var(--signal);border-color:var(--signal-sunk);background:var(--signal-sunk);}
+.warn{color:var(--caution);border-color:var(--caution-sunk);background:var(--caution-sunk);}
+.bad{color:var(--alert);border-color:var(--alert-sunk);background:var(--alert-sunk);}
+.neu{color:var(--ink-dim);border-color:var(--line);background:var(--plate);}
+.vert{color:var(--vertical);border-color:var(--vertical-sunk);background:var(--vertical-sunk);}
+
+/* ── Flow diagram ── */
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin-top:var(--s4);
+  border:1px solid var(--line);border-radius:2px;overflow:hidden;}
+.step{flex:1 1 150px;min-width:150px;padding:var(--s3) var(--s4);background:var(--plate);
+  border-right:1px solid var(--line);display:flex;flex-direction:column;gap:5px;}
+.step:last-child{border-right:0;}
+.step .t{font-size:12px;font-weight:500;color:var(--ink);}
+.step .d{font-family:var(--mono);font-size:10px;color:var(--ink-dim);line-height:1.5;}
+.step.term{background:var(--plate-hi);}
+.step.term .t{color:var(--vertical);}
+
+/* ── Defect rows: 2px state spine, the one permitted exception ── */
+.defect{display:grid;grid-template-columns:auto 1fr;gap:var(--s3);
+  border-left:2px solid var(--alert);background:var(--plate);padding:var(--s3) var(--s4);
+  margin-top:var(--s3);align-items:start;}
+.defect .i{font-family:var(--mono);font-size:15px;color:var(--alert);line-height:1.3;
+  font-variant-numeric:tabular-nums;}
+.defect p{max-width:60ch;font-size:12.5px;color:var(--ink-2);}
+.defect h3{margin:0 0 3px;color:var(--ink);font-size:12.5px;}
+
+/* ── Formula block ── */
+pre{background:var(--plate-sunk);border:1px solid var(--line);border-radius:2px;
+  padding:var(--s4);overflow-x:auto;font-family:var(--mono);font-size:11.5px;
+  line-height:1.7;color:var(--ink-2);margin-top:var(--s4);}
+pre b{color:var(--vertical);font-weight:400;}
+pre i{color:var(--ink-ghost);font-style:normal;}
+
+/* ── Layer stack for the price model ── */
+.layers{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:2px;margin-top:var(--s4);}
+.layer{background:var(--plate);padding:var(--s4);display:grid;
+  grid-template-columns:64px minmax(0,1fr);gap:var(--s4);align-items:start;}
+.layer .k{font-family:var(--mono);font-size:10px;letter-spacing:.20em;color:var(--vertical);
+  padding-top:2px;}
+.layer h3{margin:0 0 var(--s1);}
+.layer p{font-size:12.5px;color:var(--ink-2);max-width:60ch;}
+.layer p+p{margin-top:var(--s2);}
+
+/* ── Phase table state column ── */
+.ph{font-family:var(--mono);font-size:10px;letter-spacing:.20em;color:var(--vertical);
+  white-space:nowrap;}
+
+ul{padding-left:var(--s4);margin-top:var(--s3);}
+li{margin-bottom:var(--s2);color:var(--ink-2);max-width:64ch;}
+li::marker{color:var(--ink-ghost);}
+li strong{color:var(--ink);}
+ol{padding-left:var(--s4);margin-top:var(--s3);counter-reset:q;}
+ol li{margin-bottom:var(--s3);}
+
+.foot{margin-top:var(--s18);padding-top:var(--s4);border-top:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:var(--s4);justify-content:space-between;align-items:baseline;}
+
+@media (max-width:880px){
+  .shell{grid-template-columns:1fr;}
+  .rail{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);
+    padding:var(--s6) var(--s4);}
+  .toc{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 var(--s4);}
+  .main{padding:var(--s6) var(--s4) var(--s12);}
+  h1{font-size:24px;}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
+</style>
+
+<div class="shell">
+  <nav class="rail">
+    <div class="rail-brand"><span class="mark">R<span>.1</span></span>
+      <span class="micro">Vertical spec</span></div>
+    <div class="label">Contents</div>
+    <div class="toc">
+      <a href="#s01"><span class="n">01</span><span>The flow</span></a>
+      <a href="#s02"><span class="n">02</span><span>What exists</span></a>
+      <a href="#s03"><span class="n">03</span><span>The five gaps</span></a>
+      <a href="#s04"><span class="n">04</span><span>Data reality</span></a>
+      <a href="#s05"><span class="n">05</span><span>Answer layer</span></a>
+      <a href="#s06"><span class="n">06</span><span>Price model</span></a>
+      <a href="#s07"><span class="n">07</span><span>Hormuz</span></a>
+      <a href="#s08"><span class="n">08</span><span>Tactical plays</span></a>
+      <a href="#s09"><span class="n">09</span><span>Staying honest</span></a>
+      <a href="#s10"><span class="n">10</span><span>Build order</span></a>
+      <a href="#s11"><span class="n">--</span><span>Open questions</span></a>
+    </div>
+    <div class="rail-foot">
+      <span class="micro">Status</span>
+      <span class="chip ok">Built · P1–P7</span>
+      <span class="micro" style="margin-top:8px">Rendered in</span>
+      <span class="micro" style="color:var(--ink-dim)">Design V5</span>
+    </div>
+  </nav>
+
+  <main class="main">
+    <header class="masthead">
+      <div class="eyebrow">
+        <span class="chip vert">Fuel &amp; Convenience</span>
+        <span class="micro">Capability specification</span>
+      </div>
+      <h1>Retail &amp; Fuel Intelligence</h1>
+      <div class="thesis">
+        <p><strong>The thesis.</strong> Every capability here answers one operator question —
+        <em>where is money leaking, and what do I do about it in the next hour?</em></p>
+        <p>The globe is not the product. It is the surface where a modelled answer becomes
+        checkable against something the operator can see. Which means every number on screen
+        declares whether it was <span class="chip ok">measured</span>
+        <span class="chip warn">modelled</span> or <span class="chip bad">synthetic</span> —
+        a fabricated gallon count that looks like a real one destroys the only thing this
+        product sells.</p>
+      </div>
+      <div class="meta">
+        <div><span class="label">Vertical</span><span class="v num">fuel-convenience</span></div>
+        <div><span class="label">Buyer</span><span class="v">Direct multi-site operator</span></div>
+        <div><span class="label">Depends on</span><span class="v num">sites · traffic · /api/tomtom</span></div>
+        <div><span class="label">Dated</span><span class="v num">2026-09-06</span></div>
+      </div>
+    </header>
+
+    <section id="s01">
+      <div class="sec-head"><span class="n">01</span><h2>The flow</h2></div>
+      <p>The user types a business name. Everything else follows from that one input.</p>
+      <div class="flow">
+        <div class="step term"><span class="t">"Casey's"</span><span class="d">one text input</span></div>
+        <div class="step"><span class="t">Site discovery</span><span class="d">Places + OSM<br>~40 sites / metro</span></div>
+        <div class="step"><span class="t">Network on globe</span><span class="d">sites layer<br>one dot per site</span></div>
+        <div class="step"><span class="t">Live overlays</span><span class="d">traffic · price<br>competitors</span></div>
+        <div class="step term"><span class="t">Ask</span><span class="d">answers grounded<br>in what renders</span></div>
+      </div>
+      <p style="margin-top:var(--s4)"><strong>The design rule that matters:</strong> every
+      capability is a plain async function with a typed return, callable from a button, a URL
+      parameter, or a voice tool. No agent is required to run any of it — voice sits on top,
+      and is never load-bearing. If the mic is off, the product still works.</p>
+      <p>This is already how the existing engines are shaped: <code>analyzeCompetitivePosition()</code>,
+      <code>fetchTrafficDelays()</code> and <code>evaluateCoolOffOpportunities()</code> are pure
+      functions, and <code>gevActions.js</code> only dispatches to them. Keep it that way.</p>
+    </section>
+
+    <section id="s02">
+      <div class="sec-head"><span class="n">02</span><h2>The capability set</h2></div>
+      <p>Audited against the working tree. Not aspirational — these run today, on measured or
+      published data.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Capability</th><th>Module</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Business name → sites</strong></td><td><code>portfolio/businessSearch.js</code></td><td><span class="chip ok">Works</span> Places search, Overpass fallback below 5 hits</td></tr>
+          <tr><td><strong>Fuzzy address resolve</strong></td><td><code>fuzzySearchEngine.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>Activate network on globe</strong></td><td><code>sitesPanel.js</code> · <code>sitesLayer.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>CSV portfolio import</strong></td><td><code>sitesCsv.js</code> · <code>csvParser.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>Live congestion colouring</strong></td><td><code>traffic.js</code> · <code>flowTiles.js</code></td><td><span class="chip ok">Works</span> TomTom tiles; simulated dots excluded from analyst answers</td></tr>
+          <tr><td><strong>Delay / closure detection</strong></td><td><code>trafficDelayEngine.js</code></td><td><span class="chip ok">Works</span> no simulated fallback</td></tr>
+          <tr><td><strong>Congestion → promo trigger</strong></td><td><code>coolOffOpportunityEngine.js</code></td><td><span class="chip ok">Works</span> emits play IDs</td></tr>
+          <tr><td><strong>Competitor density</strong></td><td><code>competitiveEngine.js</code></td><td><span class="chip ok">Works</span> empty search returns <code>no-competitors-found</code></td></tr>
+          <tr><td><strong>Per-site ranking</strong></td><td><code>gapModel.js</code></td><td><span class="chip ok">Works</span> dollars need actuals; else demand potential</td></tr>
+          <tr><td><strong>Regional anchor + forecast</strong></td><td><code>fuelPriceModel.js</code></td><td><span class="chip ok">Works</span> with a free EIA key</td></tr>
+          <tr><td><strong>Station competitor prices</strong></td><td><code>/api/fuel-prices</code></td><td><span class="chip ok">Live, keyless</span> Spain · France</td></tr>
+          <tr><td><strong>Approach-side geometry</strong></td><td><code>approachSide.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>Play library</strong></td><td><code>playLibrary.js</code></td><td><span class="chip ok">Works</span> 6 plays, lift unmeasured</td></tr>
+          <tr><td><strong>Disruption index</strong></td><td><code>disruptionIndex.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>Weather impact</strong></td><td><code>siteWeatherImpact.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>News / regional brief</strong></td><td><code>regionalBrief.js</code></td><td><span class="chip ok">Works</span> News RSS primary, GDELT fallback</td></tr>
+          <tr><td><strong>View / portfolio rollups</strong></td><td><code>healthRollup.js</code></td><td><span class="chip ok">Works</span></td></tr>
+          <tr><td><strong>View-scoped Q&amp;A</strong></td><td><code>analystEngine.js</code></td><td><span class="chip ok">Works</span> <code>sites</code> and <code>traffic</code> now queryable</td></tr>
+        </tbody>
+      </table></div>
+      <p style="margin-top:var(--s4)">Everything above runs on measured or published data. The
+      five gaps in §03 are closed; §10 records how each was built and what was verified against
+      live feeds.</p>
+    </section>
+
+    <section id="s03">
+      <div class="sec-head"><span class="n">03</span><h2>The five gaps — all now closed</h2></div>
+      <ol>
+        <li><strong>The analyst engine cannot see the retail layers.</strong> <code>ANALYST_LAYERS</code>
+        covers flights, military, AIS vessels, fires and earthquakes. There is no entry for
+        <code>sites</code> and none for traffic. <em>"How is this view doing?"</em> is unanswerable
+        today — the question the whole product rests on.</li>
+        <li><strong>No fuel price data of any kind.</strong> Nothing in <code>src/</code> references a
+        price series. The map cannot show what competitors charge because it has never fetched a price.</li>
+        <li><strong>No price forecast</strong> — and therefore no <em>"what will this cost me in two weeks"</em>.</li>
+        <li><strong>No geopolitical → commodity correlation.</strong> AIS vessels and GDELT news both
+        exist in the repo and have never been pointed at each other.</li>
+        <li><strong>No approach-side logic.</strong> The cool-off engine scores distance to a bottleneck
+        but not which side of the road the site sits on relative to the jammed direction of travel —
+        which is most of whether a detour actually converts.</li>
+      </ol>
+    </section>
+
+    <section id="s04">
+      <div class="sec-head"><span class="n">04</span><h2>Data reality</h2></div>
+      <p>The crux of this vertical is fuel price data, and the answer is uncomfortable.
+      This was checked, not assumed.</p>
+      <div class="tw"><table>
+        <thead><tr><th>What</th><th>Availability</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Regional retail price</strong><br>weekly, by grade</td>
+            <td><a href="https://www.eia.gov/opendata/">EIA Open Data v2</a> — free key, US public domain, decades of history</td>
+            <td><span class="chip ok">Use it</span> the anchor for everything</td></tr>
+          <tr><td><strong>Crude &amp; wholesale spot</strong><br>daily · WTI, Brent</td>
+            <td>Same EIA API</td>
+            <td><span class="chip ok">Use it</span> the leading signal</td></tr>
+          <tr><td><strong>US station-level prices</strong></td>
+            <td>GasBuddy and OPIS are licensed. No free official feed exists — every "free" option is a scraper operating against a site's terms</td>
+            <td><span class="chip bad">Do not ship</span> model it, or take it from the operator</td></tr>
+          <tr><td><strong>EU / AU station prices</strong></td>
+            <td>Genuinely free and official: <a href="https://geoportalgasolineras.es">Spain</a> (Ministry REST, ~11k stations), <a href="https://www.prix-carburants.gouv.fr">France</a>, <a href="https://tankerkoenig.de">Germany</a> (MTS-K), Italy MIMIT, NSW FuelCheck</td>
+            <td><span class="chip ok">Ship it</span> verify each licence first</td></tr>
+          <tr><td><strong>Vessel transits</strong></td><td>AISStream, already proxied</td>
+            <td><span class="chip ok">Already have it</span></td></tr>
+          <tr><td><strong>Geopolitical event tone</strong></td>
+            <td>GDELT, already proxied — commercial use permitted with citation. Google News RSS is <b>noncommercial only</b></td>
+            <td><span class="chip ok">Already have it</span> don't build the commercial path on RSS</td></tr>
+          <tr><td><strong>Road congestion</strong></td><td>TomTom flow tiles, already proxied</td>
+            <td><span class="chip ok">Already have it</span></td></tr>
+          <tr><td><strong>"How busy is this store"</strong></td>
+            <td>Google Popular Times is in no public API. No free source exists</td>
+            <td><span class="chip warn">Two substitutes only</span> see below</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>The two things that must never be confused</h3>
+      <ul>
+        <li><strong>Road busy</strong> — <span class="chip ok">measured</span> TomTom gives real
+        congestion on the segments around a site. The one the product can state as fact.</li>
+        <li><strong>Store busy</strong> — <span class="chip warn">not measured</span> Either modelled
+        from road flow × time-of-day × site format, or supplied by the operator's own POS feed —
+        at which point it becomes <span class="chip ok">measured</span> and the single
+        highest-value integration in the product.</li>
+      </ul>
+      <p>A direct operator <em>has</em> the POS data. That is precisely why the wedge is direct
+      operators and not brand owners.</p>
+
+      <h3>One defect to fix while here</h3>
+      <p><code>searchOverpassSites()</code> calls <code>overpass-api.de</code> directly from the
+      browser. Every other third-party fetch in this codebase goes through a Vite middleware proxy —
+      that is the rule in <code>SECURITY.md</code>, and <code>overpassProxy.test.mjs</code> shows a
+      proxy already exists. Route it through.</p>
+    </section>
+
+    <section id="s05">
+      <div class="sec-head"><span class="n">05</span><h2>The view-grounded answer layer</h2></div>
+      <p>The highest-leverage gap, and it should be built first, because it is what makes every
+      other capability <em>askable</em>.</p>
+
+      <h3>Teach the analyst engine about retail</h3>
+      <p>Two entries added to <code>ANALYST_LAYERS</code>:</p>
+<pre><b>sites</b>: {
+  numeric: [<i>'gapUsd', 'gapGallons', 'expectedGallons', 'dominanceScore',
+            'competitorsWithin1km', 'priceCents', 'priceVsMarketCents',
+            'congestionScore', 'coolOffScore'</i>],
+  text:    [<i>'name', 'address', 'brand', 'format', 'status'</i>],
+  flags:   [<i>'isCompetitor', 'hasLivePrice'</i>],
+},
+<b>traffic</b>: {
+  numeric: [<i>'delayMin', 'frustrationScore', 'trafficLevel', 'speedMph'</i>],
+  text:    [<i>'roadType', 'delayStatus'</i>],
+  flags:   [<i>'isClosure', 'isConstruction'</i>],
+},</pre>
+      <p>The engine's existing machinery — view scoping, filters, sort, limit — then answers
+      <em>"which of my sites in view have a competitor within 1 km and are priced above market?"</em>
+      with no new query logic at all. That is the point of the existing design. It just needs the schema.</p>
+
+      <h3>Two rollups the engine cannot express</h3>
+      <div class="layers">
+        <div class="layer"><span class="k">VIEW</span><div>
+          <h3>getViewHealth() — "How is this view doing?"</h3>
+          <p>Scoped to the camera frustum. Site count, total modelled gap USD, worst performer,
+          live congestion score, active closures, price position vs. regional anchor, weather flags,
+          top-ranked play. One object, every field carrying its confidence.</p></div></div>
+        <div class="layer"><span class="k">ALL</span><div>
+          <h3>getPortfolioHealth() — "How's my entire business doing?"</h3>
+          <p>Same shape, scoped to the whole loaded portfolio, plus a regional breakdown and a ranked
+          play queue. This is <code>rankSitesByGap()</code> and <code>totalRecoverableGapUsd()</code>
+          — which already exist — wrapped with the live overlays.</p></div></div>
+      </div>
+
+      <h3>The narration contract</h3>
+      <p>The answer described —</p>
+      <div class="thesis"><p>"Great, but right now there's a traffic condition here. Could be worth
+      launching a grab-a-fresh-bottle-of-water-with-your-fill-up, because people are already slowing
+      down — especially if the station is on the right."</p></div>
+      <p>— is <strong>not</strong> free-form improvisation. It is three deterministic engine outputs
+      composed into a sentence:</p>
+      <div class="tw"><table>
+        <thead><tr><th>Clause</th><th>Source</th><th>Kind</th></tr></thead>
+        <tbody>
+          <tr><td>"there's a traffic condition here"</td><td><code>trafficDelayEngine → bottlenecks[0]</code></td><td><span class="chip ok">measured</span></td></tr>
+          <tr><td>"people are already slowing down"</td><td><code>delayMin · frustrationScore</code></td><td><span class="chip ok">measured</span></td></tr>
+          <tr><td>"station is on the right"</td><td>approach-side test (§08)</td><td><span class="chip vert">derived</span></td></tr>
+          <tr><td>"launch a water-with-fill-up promo"</td><td>play library, keyed on category × trigger</td><td><span class="chip neu">parameterised</span></td></tr>
+        </tbody>
+      </table></div>
+      <p style="margin-top:var(--s4)">The model chooses <em>which</em> play and phrases it. It never
+      invents the play, the number, or the claim. This is what keeps a confident-sounding
+      hallucination from reaching an operator as an instruction.</p>
+    </section>
+
+    <section id="s06">
+      <div class="sec-head"><span class="n">06</span><h2>The fuel price model</h2></div>
+      <p><strong>Do not build ML here.</strong> A transparent lagged regression on free public data
+      captures most of the explainable variance, runs in milliseconds in the browser, and —
+      decisively — can show its own coefficients on screen. A gradient-boosted model an operator
+      cannot interrogate is worth less than a linear one they can argue with.</p>
+      <p>Three layers, each independently inspectable.</p>
+
+      <div class="layers">
+        <div class="layer"><span class="k">L1</span><div>
+          <h3>Anchor — no model at all</h3>
+          <p>Regional weekly retail price for the site's PADD or metro, straight from EIA. Not a
+          prediction; the ground-truth level everything else is expressed relative to. Every station
+          price on the map reads as <strong>± cents vs. this anchor</strong> — which is also how
+          operators actually think about price.</p></div></div>
+
+        <div class="layer"><span class="k">L2</span><div>
+          <h3>Lead — the pass-through regression</h3>
+          <p>Pump prices follow crude and wholesale spot with a lag, and — the exploitable part —
+          <strong>asymmetrically</strong>: increases pass through faster and more completely than
+          decreases. A naive symmetric model leaves money on the table.</p>
+<pre>Δpump(t) = α + Σ <b>βₖ⁺</b>·max(Δspot(t−k),0) + Σ <b>βₖ⁻</b>·min(Δspot(t−k),0) + γ·season(t) + ε
+               <i>k=0..6</i>                        <i>k=0..6</i></pre>
+          <p>Ordinary least squares, weekly, ~10 years of EIA history for the fit. Separate positive
+          and negative coefficients — the asymmetry <em>is</em> the signal. <code>season(t)</code>
+          carries the summer/winter RVP blend switch, which moves the pump on a calendar rather than
+          on the market. Output is a <strong>1–4 week forward band</strong>, never a point estimate.</p></div></div>
+
+        <div class="layer"><span class="k">L3</span><div>
+          <h3>Risk overlay — the differentiator</h3>
+          <p>This layer does not forecast a price. It <strong>widens the upper band</strong> and
+          raises a flag, from three inputs the repo can already reach:</p>
+          <div class="tw"><table>
+            <thead><tr><th>Input</th><th>Source</th><th>Why it leads</th></tr></thead>
+            <tbody>
+              <tr><td>7-day tanker transits through a Hormuz gate vs. 90-day median</td><td>AISStream</td><td>Physical flow changes before it prints in a weekly price series</td></tr>
+              <tr><td>GDELT event volume + tone on a fixed disruption query set</td><td>GDELT</td><td>News moves in hours; retail prices in weeks</td></tr>
+              <tr><td>Realised spot volatility, 14-day</td><td>EIA daily</td><td>Confirms the other two are real, not noise</td></tr>
+            </tbody>
+          </table></div>
+          <p>When the index breaks its trailing threshold, the band widens upward and the console says
+          <em>why</em>, naming the transit count and the event cluster. The claim being made is
+          <strong>"risk has risen"</strong>, not "the price will be $X". That distinction is the
+          difference between a defensible product and a fortune teller.</p></div></div>
+
+        <div class="layer"><span class="k">L4</span><div>
+          <h3>Station level</h3>
+<pre>station price ≈ <b>regional anchor</b> + <b>station premium</b>
+station premium = f(<i>brand tier, adjacent road class, competitors within 1 mi,
+                    highway-exit vs. surface-street, own-price history</i>)</pre>
+          <p>In markets with an official station feed, fit this on real data and report the residual.
+          In the US it is <span class="chip warn">modelled</span> and must be labelled so — or replaced
+          wholesale by the operator's own price book, which is better data than anyone could buy.</p></div></div>
+      </div>
+
+      <h3>Validation — non-negotiable</h3>
+      <p>Hold out the last 24 months. Report <strong>MAE in cents/gallon against a naive "price stays
+      flat" baseline</strong>, on screen, next to the forecast. If the model does not beat naive, the
+      product says it does not beat naive. An operator who catches one unfalsifiable number stops
+      believing all of them.</p>
+    </section>
+
+    <section id="s07">
+      <div class="sec-head"><span class="n">07</span><h2>The Hormuz correlation</h2></div>
+      <p>This is the demo that sells the whole platform, because it is the only view where a
+      <em>world</em> map and a <em>store</em> map are the same map.</p>
+      <ol>
+        <li>Define a gate polygon across the Strait. Count AIS tanker transits per day — the vessel
+        layer already renders, it just needs a counting geofence.</li>
+        <li>Pull GDELT event volume and average tone for a fixed query set over the same window.</li>
+        <li>Overlay both on EIA Brent daily spot, and on the regional pump anchor lagged per §06 L2.</li>
+        <li>Show all four on one scrubbable time axis, with the correlation coefficient and the
+        lead/lag stated plainly.</li>
+      </ol>
+      <p>Then <em>"is my fuel cost about to move?"</em> has a visible chain of custody from a tanker on
+      the globe to a cent on a pump sign. Whether the correlation turns out strong or weak,
+      <strong>show the actual number</strong>. A weak correlation honestly reported is a feature; a
+      strong one asserted without evidence is what gets the product thrown out.</p>
+    </section>
+
+    <section id="s08">
+      <div class="sec-head"><span class="n">08</span><h2>Tactical plays</h2></div>
+
+      <h3>The play library, not free-form advice</h3>
+      <p>A play is a parameterised record, not a sentence the model wrote:</p>
+<pre>{ id: <b>'play:cooloff-cold-drink'</b>,
+  trigger: { minDelayMin: 8, maxDistanceM: 1200,
+             approachSide: <b>'near'</b>, categories: ['fuel','convenience'] },
+  action: 'Geo-push + forecourt signage: cold drink bundled with fill-up',
+  expectedLiftPct: { value: <b>null</b>, confidence: <i>'unmeasured'</i> },
+  requiresApproval: true }</pre>
+      <p><code>expectedLiftPct</code> starts null. It becomes a real number only after a holdout test.
+      The existing cool-off engine already emits recommendation strings — those should become play IDs,
+      so their outcomes can be measured rather than merely spoken.</p>
+
+      <h3>Approach-side test</h3>
+      <p>The missing piece: <em>"especially if the station is on the right."</em></p>
+      <div class="flow">
+        <div class="step"><span class="t">Segment bearing</span><span class="d">from consecutive<br>coordinate order</span></div>
+        <div class="step"><span class="t">Site bearing</span><span class="d">midpoint → site</span></div>
+        <div class="step"><span class="t">Cross product</span><span class="d">sign gives left / right<br>of travel direction</span></div>
+        <div class="step term"><span class="t">Near-side detour</span><span class="d">no left turn across<br>jammed traffic</span></div>
+      </div>
+      <p style="margin-top:var(--s4)"><strong>Honest limitation:</strong> TomTom encodes each
+      carriageway of a divided road as its own feature, so coordinate order tracks direction of travel
+      and the test is reliable there. On undivided roads both directions collapse into one feature and
+      the result is a heuristic. Label it: <code>approachSide: 'near' | 'far' | 'ambiguous'</code>.</p>
+
+      <h3>Competitive pricing view</h3>
+      <ul>
+        <li>Colour every station by <strong>cents vs. regional anchor</strong> on a diverging scale, so
+        the map reads as over/under-market at a glance rather than as absolute dollars.</li>
+        <li>Per site: price rank within the 1 / 3 / 5 mi rings <code>competitiveEngine</code> already computes.</li>
+        <li>Recommendations as a <strong>range with a stated basis</strong>, never a single number:
+        <em>"you are 6¢ above the three nearest competitors; the pass-through model has wholesale
+        falling ~4¢ over two weeks; holding price through that window widens the gap."</em></li>
+      </ul>
+    </section>
+
+    <section id="s09">
+      <div class="sec-head"><span class="n">09</span><h2>What must stay honest</h2></div>
+      <p><strong>All three are fixed</strong>, plus a fourth found during the rebuild. Kept here as
+      the record of what was wrong, because the failure mode matters more than the fix.</p>
+
+      <div class="defect"><span class="i">1</span><div>
+        <h3>competitiveEngine fabricates competitors on empty results</h3>
+        <p>When the network returns nothing, it synthesises <code>#101</code>-style stores at fixed
+        lat/lon offsets and returns them with <code>success: true</code> and no marker distinguishing
+        them. A synthetic competitor must be flagged <code>synthetic: true</code> and rendered visibly
+        differently — or not returned at all.</p></div></div>
+
+      <div class="defect"><span class="i">2</span><div>
+        <h3>Traffic volume is derived from a hash of the coordinates</h3>
+        <p><code>sin(lat·12.9898 + lon·78.233)</code> becomes "14k–42k vehicles/day". A plausible
+        number with no relationship to reality. Either wire real AADT, or label it
+        <span class="chip warn">estimated</span> everywhere it surfaces — including in voice
+        narration, which currently reads it aloud as fact.</p></div></div>
+
+      <div class="defect"><span class="i">3</span><div>
+        <h3>Summary strings assert confidence the data does not carry</h3>
+        <p>Readouts like <code>Commuter annoyance index: 78/100</code> read as instrument readings.
+        When the underlying path is <code>synthesizeSimulatedDelays()</code>, the readout must say
+        <em>simulated</em>. One does. The rest do not.</p></div></div>
+
+      <div class="defect"><span class="i">4</span><div>
+        <h3>Every site dot was coloured by that same coordinate hash</h3>
+        <p>Found during the rebuild: the most visible signal in the product — red / amber / green
+        on every site on the map — was noise. Dots now colour from a live per-site TomTom flow
+        reading, and a site with no reading renders neutral grey with no congestion ring. Green
+        means <em>measured free flowing</em>, never <em>we have not looked</em>.</p></div></div>
+
+      <p style="margin-top:var(--s6)">The pattern all four now follow: a value that was not
+      measured is <code>null</code>, its absence has a named state, and the voice instructions
+      forbid substituting a plausible number for it.</p>
+    </section>
+
+    <section id="s10">
+      <div class="sec-head"><span class="n">10</span><h2>Build order — as built</h2></div>
+      <p>All seven phases landed. Every figure on a retail path is now measured, published, or
+      explicitly <code>null</code>; there is no simulated fallback anywhere in the vertical.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Phase</th><th>Shipped as</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td class="ph">P1<br><span class="micro" style="letter-spacing:.1em">Askable</span></td>
+            <td><code>sites</code> + <code>traffic</code> in <code>ANALYST_LAYERS</code>; <code>healthRollup.js</code>; voice tools <code>get_view_health</code>, <code>get_portfolio_health</code></td>
+            <td><span class="chip ok">Done</span></td></tr>
+          <tr><td class="ph">P2<br><span class="micro" style="letter-spacing:.1em">Honesty</span></td>
+            <td>Synthetic competitors, hash traffic volume, hash-coloured dots, simulated corridors, the 450 veh/hr constant and the <code>|| 5.0</code> delay default all removed; Overpass through the proxy</td>
+            <td><span class="chip ok">Done</span></td></tr>
+          <tr><td class="ph">P3<br><span class="micro" style="letter-spacing:.1em">Anchor</span></td>
+            <td><code>/api/eia/series</code> with an 8-series allowlist; PADD resolution in <code>fuelPriceClient.js</code></td>
+            <td><span class="chip ok">Done</span> needs a free key</td></tr>
+          <tr><td class="ph">P4<br><span class="micro" style="letter-spacing:.1em">Plays</span></td>
+            <td><code>approachSide.js</code> cross-product side test with divided-carriageway detection; <code>playLibrary.js</code>, 6 plays</td>
+            <td><span class="chip ok">Done</span></td></tr>
+          <tr><td class="ph">P5<br><span class="micro" style="letter-spacing:.1em">Forecast</span></td>
+            <td><code>fuelPriceModel.js</code> — asymmetric lagged OLS, backtest vs naive, forward band</td>
+            <td><span class="chip ok">Done</span> verified vs synthetic truth</td></tr>
+          <tr><td class="ph">P6<br><span class="micro" style="letter-spacing:.1em">Prices</span></td>
+            <td><code>/api/fuel-prices</code> — Spain and France, official and keyless; <code>positionSitesOnPrice()</code></td>
+            <td><span class="chip ok">Done, live</span></td></tr>
+          <tr><td class="ph">P7<br><span class="micro" style="letter-spacing:.1em">Overlay</span></td>
+            <td><code>disruptionIndex.js</code> — four chokepoint gates, tanker counting, weighted departure index, lead/lag correlation</td>
+            <td><span class="chip ok">Done</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Verified against live data, not just tests</h3>
+      <ul>
+        <li><strong>France</strong>, Paris viewport: 73 real stations through a server-side bbox filter, ~19 KB.</li>
+        <li><strong>Spain</strong>, Madrid viewport: 182 of 11,303 real stations, with brands.</li>
+        <li><strong>A bug this work caught in itself.</strong> The Spanish feed uses an empty
+        string for a grade a station does not stock. <code>Number('')</code> is <code>0</code>
+        and is finite — so the first parser published a <em>€0.000</em> price for unsold fuel,
+        which would have undercut every real competitor in the ring comparison. Now null, pinned
+        by a test. Its first fix then rejected negative longitudes and silently dropped every
+        station in western Spain; the price guard and the coordinate parser are now separate
+        functions.</li>
+        <li><strong>Model validation:</strong> the regression recovers known coefficients from
+        synthetic data within tolerance, and reports ~zero asymmetry when the truth is symmetric —
+        so it cannot manufacture a pricing play that has no basis.</li>
+      </ul>
+
+      <h3>What still needs an operator, not an engineer</h3>
+      <p>Two things remain genuinely unavailable from public data. Both are now reported as
+      their own state rather than filled in:</p>
+      <ol>
+        <li><strong>Dollar gap</strong> needs actual volumes. <code>scoreSiteGap()</code> returns
+        <code>confidence: 'requires-actuals'</code> and a null gap until the operator supplies
+        them; the queue falls back to a measured-input demand-potential ranking.</li>
+        <li><strong>Store-level footfall</strong> needs POS or loyalty data. Road congestion is
+        measured; store busyness is not, and the two are kept strictly apart.</li>
+      </ol>
+    </section>
+
+    <section id="s11">
+      <div class="sec-head"><span class="n">--</span><h2>Open questions</h2></div>
+      <ol>
+        <li><strong>Which market for the pricing demo?</strong> A live Spanish or French station-price
+        map is genuinely real today; the equivalent US map is modelled. The US is the sales target but
+        the weaker artifact. Possible answer: build EU first to prove the mechanic, sell it in the US
+        against the operator's own price book.</li>
+        <li><strong>Does anyone hand over POS data before signing?</strong> Everything separating
+        "modelled store traffic" from "measured store traffic" runs through this. A real site list from
+        a regional operator is still the highest-leverage missing input.</li>
+        <li><strong>How far does the vertical generalise?</strong> The ontology already carries EV
+        mobility, aviation, maritime. The price spine is fuel-specific; the gap engine, play library and
+        approach-side logic are not. Worth keeping that seam clean.</li>
+      </ol>
+    </section>
+
+    <div class="foot">
+      <span class="micro">R.1 · Retail &amp; Fuel Intelligence · Draft 2026-09-06</span>
+      <span class="micro">Source: docs/RETAIL-FUEL-INTELLIGENCE.md</span>
+    </div>
+  </main>
+</div>

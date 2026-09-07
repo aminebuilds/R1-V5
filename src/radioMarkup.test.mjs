@@ -21,15 +21,19 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 30-tool inventory', () => {
+test('Realtime schema exposes the authoritative 40-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 30);
+  assert.equal(tools.length, 40);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 30, 'tool names are unique');
+  assert.equal(new Set(names).size, 40, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
   assert.ok(names.includes('control_radio'));
+  // The two retail rollups — "how is this view doing?" and "how's my whole
+  // business doing?" — are the questions the console exists to answer.
+  assert.ok(names.includes('get_view_health'));
+  assert.ok(names.includes('get_portfolio_health'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -176,6 +180,17 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'set_map_stack',
     'activate_network',
     'search_business_sites',
+    'search_address_or_business',
+    'analyze_competitors',
+    'get_traffic_delays_and_construction',
+    'get_cool_off_opportunities',
+    // New in the retail build — the two health rollups.
+    'get_view_health',
+    'get_portfolio_health',
+    'get_fuel_price_outlook',
+    'toggle_competitive_heatmap',
+    'get_weather',
+    'control_weather_effects',
   ]);
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))

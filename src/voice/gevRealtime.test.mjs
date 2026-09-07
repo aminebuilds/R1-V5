@@ -2591,22 +2591,22 @@ test('voice tier round-trips through storage', () => {
   assert.equal(readStoredVoiceTier(storage), 'standard');
 });
 
-test('an unset or hand-edited tier reads back as standard', () => {
-  assert.equal(readStoredVoiceTier(fakeVoiceStorage()), 'standard');
+test('an unset or hand-edited tier reads back as mini', () => {
+  assert.equal(readStoredVoiceTier(fakeVoiceStorage()), 'mini');
   assert.equal(
     readStoredVoiceTier(fakeVoiceStorage({ 'godsEyeView.voiceCost.tier': 'gpt-4o' })),
-    'standard'
+    'mini'
   );
   assert.equal(
     readStoredVoiceTier(fakeVoiceStorage({ 'godsEyeView.voiceCost.tier': '__proto__' })),
-    'standard'
+    'mini'
   );
 });
 
 test('writing a bogus tier persists the safe fallback, not the bogus value', () => {
   const storage = fakeVoiceStorage();
-  assert.equal(writeStoredVoiceTier('turbo', storage), 'standard');
-  assert.equal(storage.dump()['godsEyeView.voiceCost.tier'], 'standard');
+  assert.equal(writeStoredVoiceTier('turbo', storage), 'mini');
+  assert.equal(storage.dump()['godsEyeView.voiceCost.tier'], 'mini');
 });
 
 test('a storage that throws never breaks the mic', () => {
@@ -2618,7 +2618,7 @@ test('a storage that throws never breaks the mic', () => {
       throw new Error('SecurityError');
     },
   };
-  assert.equal(readStoredVoiceTier(hostile), 'standard');
+  assert.equal(readStoredVoiceTier(hostile), 'mini');
   assert.equal(writeStoredVoiceTier('mini', hostile), 'mini');
   assert.deepEqual(readStoredVoiceLimits(hostile), { warnUsd: 2, capUsd: 5 });
 });
@@ -2762,6 +2762,7 @@ test('F1: the cap still fires after a mid-session toggle, at the original rates'
 
 test('F1: the toggle still records the next-session preference while live', () => {
   const { controller, ui } = costControllerHarness();
+  controller.setVoiceTier('standard'); // baseline while idle, so the "session" below is on standard
   controller.status = 'listening';
   controller.setVoiceTier('mini');
   assert.equal(controller.voiceTier, 'mini');

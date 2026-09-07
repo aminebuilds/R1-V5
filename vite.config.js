@@ -1321,8 +1321,8 @@ const OPENAI_REALTIME_MODEL_DEFAULT = VOICE_MODELS.standard.id;
 const OPENAI_REALTIME_MODEL_MINI_DEFAULT = VOICE_MODELS.mini.id;
 const OPENAI_REALTIME_VOICE_DEFAULT = 'marin';
 const OPENAI_REALTIME_REASONING_DEFAULT = 'low';
-const OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT = 3000;
-const OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT = 0.5;
+const OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT = 16000;
+const OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT = 0.95;
 const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
 const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.gev-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
@@ -5083,7 +5083,7 @@ function openAiRealtimeProxy() {
       const effort = process.env.OPENAI_REALTIME_REASONING_EFFORT || OPENAI_REALTIME_REASONING_DEFAULT;
       const contextTokenLimit = Math.round(Math.max(
         1000,
-        Math.min(12000, Number(process.env.OPENAI_REALTIME_CONTEXT_TOKENS) || OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT)
+        Math.min(32000, Number(process.env.OPENAI_REALTIME_CONTEXT_TOKENS) || OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT)
       ));
       const contextRetentionRatio = Math.max(
         0.1,
@@ -5116,6 +5116,7 @@ function openAiRealtimeProxy() {
           instructions: [
             "You are GEV Voice Control, a concise voice controller for a Cesium geospatial app called God's Eye View.",
             'Have a natural spoken conversation with the user while the mic session is active.',
+            'Retain strong conversational memory across all user turns in this session. When the user refers to previously mentioned locations, stores, traffic conditions, competitors, questions, or sites (e.g. "go there", "what about the other one?", "how is that one doing?"), use your dialogue history to resolve their intent accurately.',
             'Do not require a wake phrase. Treat direct commands like "zoom into London" or "open datacenters" as GEV control requests.',
             'Only control the app by calling the provided tools. Never invent tool names or arguments.',
             'Call tools only for clear GEV control, navigation, visual-style, layer, or app-state requests. For ordinary conversation, answer normally without tools.',
@@ -5159,8 +5160,16 @@ function openAiRealtimeProxy() {
             'NAMED VIEWS are shorthand for tool calls you already have — there is no "mode" tool for them. Treat ONLY these as the shorthand: "infrastructure mode" / "the infrastructure view" / "show me global infrastructure" means three set_layer_visibility calls (local-datacenters, local-dams, telegeography-submarine-cables) plus zoom_to_globe; "environmental mode" / "earth watch" / "active events", said as the name of a view, means set_layer_visibility for local-firms and earthquakes plus zoom_to_globe. Anything vaguer is NOT this shorthand — an open-ended question about the world or the news is an ordinary question: answer it, or use analyst_query over the layers already on. Never switch a whole view on to answer a question nobody asked to see. When you do run one, make every call before speaking, then give one confirmation naming the resulting state; if the fires layer comes back unavailable because no FIRMS key is configured, say so plainly — the earthquakes still loaded. "Live contacts" and "space missions" are NOT this pattern: they stay set_context_mode{mode:"contacts"} and set_context_mode{mode:"space-missions"}.',
             'For visual filter requests, call set_visual_style with one of the allowed style IDs.',
             'Disambiguation table — basemap vs layer vs style: basemap switching requires an explicit stack name — "Bing aerial" means set_map_stack bing-aerial, "aerial with labels" means bing-labels, "OSM"/"road map" means osm, "Google 3D"/"photorealistic" means photoreal. Any mention of "satellite" or "satellites" ALWAYS means the satellites DATA LAYER via set_layer_visibility, never a basemap. "surveillance"/"night vision"/"thermal" are visual STYLES via set_visual_style.',
-            '"I\'m/we\'re <business>", "add my <business> locations", or "find <business> near here" uses search_business_sites — it searches for that business name near the current camera view and adds every match to the Banner OS site portfolio (the SITES panel). This only finds nearby matches, not a nationwide list, so say so plainly if the user asks for every location of a chain across the whole country. Confirm with the count returned, e.g. "Found four Torchy\'s Tacos nearby, added to your portfolio" or "No matches found near here" — never claim locations were added without ok=true and a positive count.',
-            'HUD requests ("hud on/off", "switch to operator/minimal/tactical layout") use set_hud. Detection requests ("detection on", "dense mode", "balanced mode", "sparse mode", "set density to 25", "use weighted allocation") use set_detection. Density snaps to 0/25/50/75/100 and derives Sparse/Balanced/Dense; panoptic is a legacy alias for Dense.',
+            '"I\'m/we\'re <business>", "add my <business> locations", or "find <business> near here" uses search_business_sites or search_address_or_business — it searches for that business name or address with JARVIS fuzzy matching and adds matches to the SITES portfolio. Say "Target acquired" or confirm with the count returned.',
+            'For questions about competition — "how am I doing vs competitors?", "compare me to Dunkin", "who is beating me here?", "competitive research" — call analyze_competitors. Report the regional market share, territorial dominance score, and spatial advantage clearly in your spoken JARVIS summary.',
+            'For traffic questions — "show real-time traffic", "any construction or delays nearby?", "where is traffic jammed?" — call get_traffic_delays_and_construction. Summarize the number of bottlenecks, construction zones, and max delay minutes.',
+            'For conversion and commuter opportunity questions — "when should I convert annoyed drivers?", "cool-off opportunities", "who is stuck in traffic ready to buy?" — call get_cool_off_opportunities. Name the top location, the measured delay, the approach side, and the matching play by name. Never state or estimate an expected lift, a conversion rate, or a number of extra visits: the plays carry expectedLiftPct null until a holdout test measures it, and inventing one is the single worst thing you can do here.',
+            'For "how is this view doing?", "how are things looking here?", "what is happening at my sites on screen" — call get_view_health. For "how is my whole business doing?", "how is the portfolio?", "overall health" — call get_portfolio_health. Read the coverage honestly: if flow was measured for 3 of 40 sites, say the reading covers 3 of 40. Never average away a null or present a partial reading as the whole picture.',
+            'For fuel price questions — "what will fuel cost?", "where are prices going?", "how do my prices compare?", "is my fuel cost about to move?" — call get_fuel_price_outlook. Report the anchor as a published EIA figure, the forecast as a BAND with both bounds, and the backtest MAE against the naive baseline. If beatsNaive is false, say the model does not beat assuming prices stay flat. If a disruption index is present, say only that RISK has risen and name the tanker count behind it — never translate a risk index into a predicted price.',
+            'Absolute rule for every retail tool: a null figure means it was NOT measured. Say "not measured" or "no reading". Never substitute a plausible number, never round a null to zero, and never describe a modelled or ranked index as a measured volume, a footfall, or a dollar amount.',
+            'For weather requests — "what\'s the weather?", "is it raining in Tokyo?", "temperature in Paris", "weather conditions" — call get_weather. It returns full meteorological data: temperature, conditions (RAIN, CLEAR, SNOW, THUNDERSTORM), precipitation mm, wind speed, and cloud cover. Read the weather conditions and temperature clearly.',
+            'For weather effect controls — "turn on rain", "show weather effects", "turn off rain" — call control_weather_effects with enabled=true/false.',
+            'For heatmap requests — "show heatmap", "switch heatmap to competitors / traffic / cool-off" — call toggle_competitive_heatmap with the requested mode.',
             'Bloom/sharpen requests use set_post_processing. Scene requests ("play orbital watch", "stop the scene", "what scenes are there") use control_scene. CCTV camera requests ("next camera", "nearest camera", "select the Congress camera", "show coverage") use control_cctv — the CCTV layer must be enabled first.',
             'Radio playback requests use control_radio. "Turn on/start the radio" means action=play; action=enable only reveals Radio markers and must be reserved for explicit "show/enable the Radio layer/markers" requests. After a prepared playback result, briefly confirm any other completed actions and say "Turning on the radio"—never claim it is already playing. The client keeps Radio muted until playback is verified, then closes voice before restoring Radio volume. Examples: "play news near Austin" → select category=news locationId=austin; "play US news" → select category=news country=US; "Radio volume 30" → volume; pause/resume/stop/next/previous use the matching action. Radio selection never moves the camera.',
             '"Track/follow <something specific>" (a callsign, ship name, satellite name) uses track_entity. "Take me to the biggest fire" uses track_entity with query "biggest fire" (the fires layer must be enabled). Bare "orbit" means camera orbit of the current landmark. "Stop following/tracking" uses stop_tracking.',
@@ -6184,6 +6193,142 @@ const GEV_REALTIME_TOOLS = [
         longitude: { type: 'number', minimum: -180, maximum: 180, description: 'Optional search-center longitude. Omit to use the current camera position.' },
       },
       required: ['businessName'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'search_address_or_business',
+    description: "JARVIS-grade bulletproof fuzzy search for any business name, brand, street address, or landmark. Tolerates typos, misspellings, abbreviations, and informal phrasing (e.g. 'sturbucks near soco', '500 s congres', 'wholfoods downtown'). Discovers coordinates, computes confidence, and optionally flies the camera there.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string', description: "Address, business name, or place search query." },
+        latitude: { type: 'number', minimum: -90, maximum: 90, description: "Optional search-center latitude." },
+        longitude: { type: 'number', minimum: -180, maximum: 180, description: "Optional search-center longitude." },
+        flyTo: { type: 'boolean', description: "Whether to fly the camera to the best match. Default true." },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'analyze_competitors',
+    description: "Analyze competitive market position: 'How am I doing vs competitors in this area?'. Measures spatial market share, store density (1km/3km/5km), traffic capture share, and access friction vs competing brands. Delivers a comprehensive JARVIS strategic breakdown.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        brandName: { type: 'string', description: "Primary brand to analyze (defaults to active portfolio brand if omitted)." },
+        competitors: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Optional list of competitor brand names to benchmark against (e.g. ['Dunkin', 'Dutch Bros'])."
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_traffic_delays_and_construction',
+    description: "Detect live traffic delays, road construction zones, and severe congestion bottlenecks across the surrounding area. Returns delay minutes, speed ratio, bottleneck corridors, and commuter frustration ratings.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        radiusKm: { type: 'number', minimum: 1, maximum: 30, description: "Search radius in km. Default 6." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_cool_off_opportunities',
+    description: "Identify 'Cool-Off' conversion opportunities where drivers held up by measured congestion or a road closure are within a short detour of a portfolio site. Returns a ranked score per site with the measured delay, detour distance, and which side of the jammed direction the site sits on, plus matching plays from the play library. Recommendations are library lookups, not invented advice, and every play's expected lift is null until a holdout test measures it.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_fuel_price_outlook',
+    description: "Fuel price outlook for the region under the camera: the published EIA regional retail anchor, the current crude spot, a fitted asymmetric pass-through model with its cumulative up/down coefficients, a backtest report card (holdout MAE in cents per gallon against a flat-price baseline), and a 4-week forward BAND. Always state the band, never a single number, and always read the backtest result aloud — including when the model does not beat the naive baseline. Requires EIA_API_KEY; without it the status is no-key and there is no forecast to report.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+        chokepoint: {
+          type: 'string',
+          enum: ['hormuz', 'malacca', 'suez', 'bab'],
+          description: 'Which chokepoint to count tanker traffic through for the risk context. Default hormuz.',
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_view_health',
+    description: "Answer 'how is this view doing?' — a rollup over the portfolio sites and live traffic currently within the camera's view radius. Returns site count, measured congestion, corridor bottlenecks and closures, price position vs the regional anchor where prices are loaded, and a ranked opportunity list. Every figure that was not measured is null, and the coverage block says how many sites each figure rests on — read those aloud rather than implying full coverage.",
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    type: 'function',
+    name: 'get_portfolio_health',
+    description: "Answer 'how is my whole business doing?' — the same rollup as get_view_health but across the entire loaded portfolio regardless of where the camera points, plus a per-region breakdown and a count of sites that never geocoded. Traffic figures still only cover the current viewport; use the coverage block to say so.",
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    type: 'function',
+    name: 'toggle_competitive_heatmap',
+    description: "Toggle or switch the dynamic 3D radiant heatmap layer between 'traffic' (congestion/delay density), 'competitor' (competitive pressure/dominance), and 'opportunity' (cool-off conversion zones).",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['traffic', 'competitor', 'opportunity'],
+          description: "Specific heatmap mode to activate."
+        },
+        enabled: { type: 'boolean', description: "Explicitly enable or disable heatmap visibility." },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_weather',
+    description: "Get live real-time weather conditions, temperature (Celsius/Fahrenheit), precipitation mm/h, rain/snow status, wind speed, and cloud cover for the current location or any requested city/place (e.g. 'Tokyo', 'Paris', 'Austin').",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        locationQuery: { type: 'string', description: "Optional city or place name to query weather for (e.g. 'Tokyo', 'Austin'). Omit to use the current camera view position." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'control_weather_effects',
+    description: "Toggle or set visual 3D weather rendering effects (rain droplets, clouds, lightning) on or off in the scene.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean', description: "true to enable visual rain/weather effects, false to disable." },
+      },
+      required: ['enabled'],
     },
   },
 ];
@@ -7304,6 +7449,494 @@ function weatherEffectsProxy() {
   };
 }
 
+// ── EIA (U.S. Energy Information Administration) price series ───────────────
+//
+// The fuel-price spine. EIA Open Data v2 is free, US-Government public domain,
+// and carries decades of history — which is what makes the pass-through model
+// in src/portfolio/fuelPriceModel.js backtestable rather than merely plausible.
+//
+// SSRF posture, per SECURITY.md: the client never names a URL. It names a
+// series KEY from the allowlist below, and this proxy builds the upstream URL
+// itself. An unrecognised key is a 400, not a fetch.
+
+/**
+ * Allowlisted EIA series. `route` is the v2 dataset path, `series` the facet
+ * value, `frequency` how often it prints.
+ *
+ * Retail series are dollars per gallon; spot crude is dollars per barrel.
+ */
+const EIA_SERIES = Object.freeze({
+  // Spot — the leading signal.
+  'spot-wti': { route: 'petroleum/pri/spt', series: 'RWTC', frequency: 'daily', unit: 'usd/bbl', label: 'WTI Cushing spot' },
+  'spot-brent': { route: 'petroleum/pri/spt', series: 'RBRTE', frequency: 'daily', unit: 'usd/bbl', label: 'Brent Europe spot' },
+  // Retail — the anchor. National plus the five PADD regions.
+  'retail-us': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_NUS_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'US regular all formulations' },
+  'retail-padd1': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_R10_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'PADD 1 East Coast' },
+  'retail-padd2': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_R20_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'PADD 2 Midwest' },
+  'retail-padd3': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_R30_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'PADD 3 Gulf Coast' },
+  'retail-padd4': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_R40_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'PADD 4 Rocky Mountain' },
+  'retail-padd5': { route: 'petroleum/pri/gnd', series: 'EMM_EPM0_PTE_R50_DPG', frequency: 'weekly', unit: 'usd/gal', label: 'PADD 5 West Coast' },
+});
+
+const EIA_CACHE_MS = 6 * 60 * 60_000;   // Weekly/daily series; six hours is generous.
+const EIA_STALE_MS = 14 * 24 * 60 * 60_000;
+const EIA_MAX_CACHE = 40;
+const EIA_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const _eiaCache = new Map();
+const _eiaInFlight = new Map();
+const _eiaRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 90 });
+
+function trimEiaCache() {
+  while (_eiaCache.size > EIA_MAX_CACHE) {
+    const oldest = _eiaCache.keys().next().value;
+    if (oldest === undefined) break;
+    _eiaCache.delete(oldest);
+  }
+}
+
+/**
+ * Fetch one allowlisted series from EIA and normalise it to
+ * `[{period, value}]`, oldest first.
+ * @param {string} seriesKey
+ * @param {string} start ISO date.
+ * @param {string} apiKey
+ * @returns {Promise<object>}
+ */
+async function fetchEiaSeries(seriesKey, start, apiKey) {
+  const spec = EIA_SERIES[seriesKey];
+  const url = new URL(`https://api.eia.gov/v2/${spec.route}/data/`);
+  url.searchParams.set('api_key', apiKey);
+  url.searchParams.set('frequency', spec.frequency);
+  url.searchParams.append('data[0]', 'value');
+  url.searchParams.append('facets[series][]', spec.series);
+  url.searchParams.set('start', start);
+  url.searchParams.set('sort[0][column]', 'period');
+  url.searchParams.set('sort[0][direction]', 'asc');
+  url.searchParams.set('length', '5000');
+
+  const json = await fetchRegionalJson(url.toString(), {
+    timeoutMs: 15000,
+    maxBytes: EIA_MAX_RESPONSE_BYTES,
+  });
+
+  const rows = Array.isArray(json?.response?.data) ? json.response.data : [];
+  const points = rows
+    .map((row) => ({ period: String(row.period || ''), value: Number(row.value) }))
+    .filter((p) => p.period && Number.isFinite(p.value));
+
+  return {
+    status: points.length > 0 ? 'ready' : 'no-data',
+    seriesKey,
+    seriesId: spec.series,
+    label: spec.label,
+    unit: spec.unit,
+    frequency: spec.frequency,
+    points,
+    retrievedAt: new Date().toISOString(),
+    attribution: 'U.S. Energy Information Administration (EIA)',
+  };
+}
+
+function eiaProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/eia/series', async (req, res) => {
+      const sendJson = (status, obj, cacheState) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': status === 200 ? 'public, max-age=1800' : 'no-store',
+          ...(cacheState ? { 'X-EIA-Cache': cacheState } : {}),
+        });
+        res.end(JSON.stringify(obj));
+      };
+
+      if (req.method !== 'GET') {
+        sendJson(405, { error: 'Method Not Allowed' });
+        return;
+      }
+      if (!_eiaRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+
+      const url = new URL(req.url || '', 'http://localhost');
+      const seriesKey = String(url.searchParams.get('id') || '').trim();
+      if (!EIA_SERIES[seriesKey]) {
+        sendJson(400, {
+          error: 'Unknown series id',
+          allowed: Object.keys(EIA_SERIES),
+        });
+        return;
+      }
+
+      const apiKey = process.env.EIA_API_KEY;
+      if (!apiKey) {
+        // Same convention as FIRMS: an absent key is its own state, never an
+        // empty series that reads downstream as "prices are flat".
+        sendJson(503, { error: 'no_key', series: seriesKey });
+        return;
+      }
+
+      // Default window: 12 years, enough to fit the pass-through model and
+      // still hold out two years for validation.
+      const requestedStart = String(url.searchParams.get('start') || '').trim();
+      const start = /^\d{4}-\d{2}-\d{2}$/.test(requestedStart)
+        ? requestedStart
+        : new Date(Date.now() - 12 * 365 * 24 * 60 * 60_000).toISOString().slice(0, 10);
+
+      const cacheId = `${seriesKey}|${start}`;
+      const now = Date.now();
+      const cached = _eiaCache.get(cacheId);
+      if (cached && now - cached.cachedAt <= EIA_CACHE_MS) {
+        sendJson(200, cached.payload, 'HIT');
+        return;
+      }
+
+      const request = coalesceProxyRequest(_eiaInFlight, cacheId, async () => {
+        const payload = await fetchEiaSeries(seriesKey, start, apiKey);
+        _eiaCache.set(cacheId, { payload, cachedAt: Date.now() });
+        trimEiaCache();
+        return payload;
+      });
+
+      try {
+        const payload = await request.promise;
+        sendJson(200, payload, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        // A long-lived price series is worth serving stale — the model's own
+        // lag is measured in weeks.
+        if (cached && now - cached.cachedAt <= EIA_STALE_MS) {
+          sendJson(200, { ...cached.payload, status: 'stale' }, 'STALE');
+          return;
+        }
+        console.error('[EIA Proxy]', error?.message || error);
+        sendJson(502, { error: 'EIA series unavailable' });
+      }
+    });
+
+    // What the client may ask for, so the UI can build its own selector
+    // without hard-coding the allowlist a second time.
+    middlewares.use('/api/eia/catalog', (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' });
+      res.end(JSON.stringify({
+        hasKey: Boolean(process.env.EIA_API_KEY),
+        series: Object.entries(EIA_SERIES).map(([id, spec]) => ({
+          id, label: spec.label, unit: spec.unit, frequency: spec.frequency,
+        })),
+        attribution: 'U.S. Energy Information Administration (EIA)',
+      }));
+    });
+  }
+
+  return {
+    name: 'eia-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+// ── Station-level fuel prices ───────────────────────────────────────────────
+//
+// The honest position, checked rather than assumed: there is NO free official
+// station-level price feed in the US. GasBuddy and OPIS are licensed, and
+// every "free" alternative is a scraper running against someone's terms of
+// service. So the US path is the operator's own price book (uploaded), and the
+// live-per-station map is built on the countries that DO publish official open
+// data. Those are real, free, and attributable:
+//
+//   Spain  — Ministerio para la Transición Ecológica, keyless REST, ~11k sites
+//   France — prix-carburants / data.gouv.fr open data
+//
+// Both are listed in DATA_SOURCES.md with their attribution requirements.
+
+const FUEL_PRICE_SOURCES = Object.freeze({
+  es: {
+    label: 'Spain — Ministerio para la Transición Ecológica',
+    url: 'https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/',
+    attribution: 'Ministerio para la Transición Ecológica y el Reto Demográfico (geoportalgasolineras.es)',
+    currency: 'EUR',
+    unit: 'eur/l',
+    // No server-side spatial filter: the ministry serves the whole country
+    // (~12 MB) in one document, so it is cached here and clipped locally.
+    serverSideBbox: false,
+  },
+  fr: {
+    label: 'France — prix des carburants (data.economie.gouv.fr)',
+    // The Opendatasoft export endpoint, which accepts a bbox filter and
+    // returns flat JSON. The older roulez-eco "instantane" feed serves a ZIP
+    // archive, which would need unzipping in-process for no benefit.
+    url: 'https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/exports/json',
+    attribution: 'Ministère de l\'Économie — prix-carburants.gouv.fr (Licence Ouverte)',
+    currency: 'EUR',
+    unit: 'eur/l',
+    serverSideBbox: true,
+  },
+});
+
+const FUEL_PRICE_CACHE_MS = 30 * 60_000;
+const FUEL_PRICE_STALE_MS = 24 * 60 * 60_000;
+const FUEL_PRICE_MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
+const _fuelPriceCache = new Map();
+const _fuelPriceInFlight = new Map();
+const _fuelPriceRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+
+/**
+ * Spanish decimal commas → numbers. Signed, because longitudes west of
+ * Greenwich (most of Spain, and all of the Canaries) are negative.
+ */
+export function esNumber(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return null;
+  const n = Number(text.replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Spanish price fields specifically.
+ *
+ * An empty field means the grade is NOT SOLD at that station, and it must
+ * become null rather than zero: `Number('')` is 0 and is finite, so a naive
+ * parse publishes a €0.000 price for a fuel the station does not stock —
+ * which then undercuts every real competitor in any comparison built on it.
+ * Kept separate from {@link esNumber} because the "must be positive" rule is
+ * true of prices and false of coordinates.
+ */
+export function esPrice(value) {
+  const n = esNumber(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Normalise the Spanish ministry payload to the shared station shape.
+ * @param {object} json
+ * @returns {object[]}
+ */
+export function parseSpanishStations(json) {
+  const rows = Array.isArray(json?.ListaEESSPrecio) ? json.ListaEESSPrecio : [];
+  const out = [];
+  for (const row of rows) {
+    const lat = esNumber(row['Latitud']);
+    const lon = esNumber(row['Longitud (WGS84)']);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const prices = {
+      gasoline95: esPrice(row['Precio Gasolina 95 E5']),
+      gasoline98: esPrice(row['Precio Gasolina 98 E5']),
+      diesel: esPrice(row['Precio Gasoleo A']),
+    };
+    if (prices.gasoline95 === null && prices.diesel === null) continue;
+    out.push({
+      id: `fuel:es:${row['IDEESS']}`,
+      brand: String(row['Rótulo'] || '').trim() || null,
+      address: [row['Dirección'], row['Municipio'], row['Provincia']].filter(Boolean).join(', '),
+      lat,
+      lon,
+      prices,
+      currency: 'EUR',
+      unit: 'eur/l',
+      country: 'es',
+    });
+  }
+  return out;
+}
+
+/**
+ * Normalise the French Opendatasoft rows.
+ *
+ * Coordinates arrive as strings in degrees × 100000 ("4884700" → 48.847).
+ * E10 has largely displaced SP95 on French forecourts, so it stands in as the
+ * 95-octane grade when SP95 is absent — and `gasolineE10` is kept separately
+ * so a caller can tell which one it actually got.
+ * @param {object[]} rows
+ * @returns {object[]}
+ */
+export function parseFrenchStations(rows) {
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const lat = Number(row?.latitude) / 100000;
+    const lon = Number(row?.longitude) / 100000;
+    if (!row?.id || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
+    const sp95 = num(row.sp95_prix);
+    const e10 = num(row.e10_prix);
+    const prices = {
+      gasoline95: sp95 ?? e10,
+      gasolineE10: e10,
+      gasoline98: num(row.sp98_prix),
+      diesel: num(row.gazole_prix),
+    };
+    if (prices.gasoline95 === null && prices.diesel === null) continue;
+
+    out.push({
+      id: `fuel:fr:${row.id}`,
+      brand: null,
+      address: [row.adresse, row.ville].filter(Boolean).join(', '),
+      lat,
+      lon,
+      prices,
+      currency: 'EUR',
+      unit: 'eur/l',
+      country: 'fr',
+      // Which grade filled `gasoline95`, so nothing downstream compares an
+      // E10 price against an SP95 one without knowing.
+      gasoline95Grade: sp95 !== null ? 'SP95' : (e10 !== null ? 'E10' : null),
+    });
+  }
+  return out;
+}
+
+/**
+ * @param {string} country
+ * @param {{south:number,west:number,north:number,east:number}|null} bounds
+ * @returns {Promise<object[]>}
+ */
+async function fetchFuelPriceStations(country, bounds = null) {
+  const source = FUEL_PRICE_SOURCES[country];
+  if (country === 'es') {
+    const json = await fetchRegionalJson(source.url, {
+      timeoutMs: 30000,
+      maxBytes: FUEL_PRICE_MAX_RESPONSE_BYTES,
+    });
+    return parseSpanishStations(json);
+  }
+
+  // France filters upstream, so a city view transfers a few kilobytes rather
+  // than the whole ~10,000-station country file.
+  const url = new URL(source.url);
+  url.searchParams.set('select', 'id,latitude,longitude,ville,adresse,gazole_prix,sp95_prix,sp98_prix,e10_prix');
+  if (bounds) {
+    url.searchParams.set(
+      'where',
+      `in_bbox(geom, ${bounds.south}, ${bounds.west}, ${bounds.north}, ${bounds.east})`,
+    );
+  }
+  const rows = await fetchRegionalJson(url.toString(), {
+    timeoutMs: 30000,
+    maxBytes: FUEL_PRICE_MAX_RESPONSE_BYTES,
+  });
+  return parseFrenchStations(rows);
+}
+
+function fuelPriceProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/fuel-prices', async (req, res) => {
+      const sendJson = (status, obj, cacheState) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': status === 200 ? 'public, max-age=900' : 'no-store',
+          ...(cacheState ? { 'X-Fuel-Cache': cacheState } : {}),
+        });
+        res.end(JSON.stringify(obj));
+      };
+
+      if (req.method !== 'GET') {
+        sendJson(405, { error: 'Method Not Allowed' });
+        return;
+      }
+      if (!_fuelPriceRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+
+      const url = new URL(req.url || '', 'http://localhost');
+      const country = String(url.searchParams.get('country') || '').trim().toLowerCase();
+
+      if (!country) {
+        sendJson(200, {
+          countries: Object.entries(FUEL_PRICE_SOURCES).map(([id, s]) => ({
+            id, label: s.label, unit: s.unit, currency: s.currency, attribution: s.attribution,
+          })),
+          // Said plainly, because a silent absence reads as "no data here".
+          note: 'No free official station-level price feed exists for the US; supply an operator price book instead.',
+        });
+        return;
+      }
+      if (!FUEL_PRICE_SOURCES[country]) {
+        sendJson(400, {
+          error: 'No official open price feed is wired for that country',
+          available: Object.keys(FUEL_PRICE_SOURCES),
+        });
+        return;
+      }
+
+      // Optional viewport clip, so a whole-country payload is not shipped to
+      // the browser when the camera is over one city.
+      const bbox = ['south', 'west', 'north', 'east']
+        .map((k) => Number(url.searchParams.get(k)));
+      const hasBbox = bbox.every(Number.isFinite)
+        && bbox[2] > bbox[0] && bbox[3] > bbox[1];
+      const bounds = hasBbox
+        ? { south: bbox[0], west: bbox[1], north: bbox[2], east: bbox[3] }
+        : null;
+
+      const source = FUEL_PRICE_SOURCES[country];
+      // A source that filters UPSTREAM returns a different set per viewport,
+      // so its cache key has to carry the viewport too. Sharing one country
+      // entry across viewports would serve Paris's stations for Marseille.
+      const cacheId = source.serverSideBbox && bounds
+        ? `${country}|${bbox.map((n) => n.toFixed(3)).join(',')}`
+        : country;
+
+      const now = Date.now();
+      const cached = _fuelPriceCache.get(cacheId);
+      // Locally clip only what was not already clipped upstream.
+      const clip = (stations) => {
+        if (!bounds || source.serverSideBbox) return stations;
+        return stations.filter((s) => s.lat >= bounds.south && s.lat <= bounds.north
+          && s.lon >= bounds.west && s.lon <= bounds.east);
+      };
+      const respond = (stations, cacheState, status = 'ready') => {
+        const clipped = clip(stations);
+        sendJson(200, {
+          status,
+          country,
+          unit: FUEL_PRICE_SOURCES[country].unit,
+          currency: FUEL_PRICE_SOURCES[country].currency,
+          attribution: FUEL_PRICE_SOURCES[country].attribution,
+          totalAvailable: stations.length,
+          count: clipped.length,
+          stations: clipped,
+        }, cacheState);
+      };
+
+      if (cached && now - cached.cachedAt <= FUEL_PRICE_CACHE_MS) {
+        respond(cached.stations, 'HIT');
+        return;
+      }
+
+      const request = coalesceProxyRequest(_fuelPriceInFlight, cacheId, async () => {
+        const stations = await fetchFuelPriceStations(country, bounds);
+        _fuelPriceCache.set(cacheId, { stations, cachedAt: Date.now() });
+        while (_fuelPriceCache.size > 24) {
+          const oldest = _fuelPriceCache.keys().next().value;
+          if (oldest === undefined) break;
+          _fuelPriceCache.delete(oldest);
+        }
+        return stations;
+      });
+
+      try {
+        const stations = await request.promise;
+        respond(stations, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        if (cached && now - cached.cachedAt <= FUEL_PRICE_STALE_MS) {
+          respond(cached.stations, 'STALE', 'stale');
+          return;
+        }
+        console.error('[Fuel Price Proxy]', error?.message || error);
+        sendJson(502, { error: 'Fuel price feed unavailable', country });
+      }
+    });
+  }
+
+  return {
+    name: 'fuel-price-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function parseJsonEnv(key, fallback) {
   const value = process.env[key];
   if (!value) return fallback;
@@ -7393,6 +8026,8 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      eiaProxy(),
+      fuelPriceProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',

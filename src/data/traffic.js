@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { deriveFetchCenter, clampBoundsAroundCenter } from './trafficBounds.js';
 import { fetchFlowForBounds, getFlowSessionStats, resetFlowTileCache } from './flowTiles.js';
 import { matchFlowToRoads } from './flowMatch.js';
+import { analyzeSegmentDelay } from '../portfolio/trafficDelayEngine.js';
 import { flowBucket, flowSpeedScale, flowDensityMult } from './trafficFlowStyle.js';
 import {
   trafficStyleProfile,
@@ -191,6 +192,13 @@ let _liveMode = false;
  * @type {string|null}
  */
 let _flowError = null;
+/**
+ * Raw flow segments from the most recent successful fetch, kept so the analyst
+ * engine can query live congestion without issuing its own request.
+ * @type {Array<{coords:number[][], trafficLevel:number, roadType:string, closure:boolean}>}
+ */
+let _lastFlowSegments = [];
+let _lastFlowSegmentsAt = null;
 /**
  * True when `/api/tomtom/status` itself could not be reached, so the layer is
  * simulating because it could not ask — not because the server said "no key".
@@ -1344,6 +1352,11 @@ async function applyFlowToRoads(roads, clamped, generation) {
       if (!_activeFetchAbort) _activeFetchAbort = new AbortController();
       const segments = await fetchFlowForBounds(clamped, { signal: _activeFetchAbort.signal });
       if (generation !== _loadGeneration) return;
+      // Retain the raw segments so the analyst engine can answer questions
+      // about congestion over what is ALREADY on screen, without re-fetching.
+      // The engine's contract is client-side data only.
+      _lastFlowSegments = segments;
+      _lastFlowSegmentsAt = Date.now();
       const { matches, matchedCount, candidateCount } = matchFlowToRoads(roads, segments);
       for (let i = 0; i < roads.length; i++) {
         roads[i].flow = matches[i];
@@ -1630,13 +1643,14 @@ function renderRoadsForAltitude(roads, altitude, label, trace = null) {
     roadCount: roads.length,
     visibleRoadCount: filteredRoads.length,
   }) : null;
-  const roadBudgets = allocateRoadDotBudgets(filteredRoads, altitude, MAX_DOTS);
+  const currentMaxDots = !Number.isFinite(altitude) ? 3200 : altitude > 5500 ? 2000 : altitude > 3500 ? 2800 : 3800;
+  const roadBudgets = allocateRoadDotBudgets(filteredRoads, altitude, currentMaxDots);
   for (let i = 0; i < filteredRoads.length; i++) {
     const road = filteredRoads[i];
     const budget = roadBudgets[i] || 0;
     if (budget <= 0) continue;
     spawnDotsForRoad(road, altitude, budget);
-    if (_dots.length >= MAX_DOTS) break;
+    if (_dots.length >= currentMaxDots) break;
   }
 
   const renderMetrics = state ? {
@@ -2460,6 +2474,41 @@ const trafficLayer = {
    *   mode:'live'|'sim', error:string|null, flowCoveragePct:number,
    *   tilesFetched:number}}
    */
+  /**
+   * Live congestion segments as analyst records.
+   *
+   * Sourced from the last SUCCESSFUL flow fetch — the same segments driving
+   * the colours on screen. Returns `[]` while running the keyless simulation,
+   * because simulated dots are an ambient visual, not a measurement, and an
+   * analyst answer built on them would be indistinguishable from a real one.
+   * @param {number} [limit]
+   * @returns {object[]}
+   */
+  getAnalystRecords(limit = 4000) {
+    if (!_liveMode || !Array.isArray(_lastFlowSegments) || _lastFlowSegments.length === 0) return [];
+    const out = [];
+    for (let i = 0; i < _lastFlowSegments.length && out.length < limit; i++) {
+      const analyzed = analyzeSegmentDelay(_lastFlowSegments[i]);
+      if (!analyzed) continue;
+      out.push({
+        id: `flow:${i}`,
+        lat: analyzed.midLat,
+        lon: analyzed.midLon,
+        roadType: analyzed.roadType,
+        delayStatus: analyzed.delayStatus,
+        delayMin: analyzed.delayMin,
+        frustrationScore: analyzed.frustrationScore,
+        trafficLevel: analyzed.trafficLevel,
+        speedMph: analyzed.speedMph,
+        lengthM: analyzed.lengthM,
+        isClosure: analyzed.isClosure,
+        isConstruction: analyzed.isConstruction,
+        measuredAt: _lastFlowSegmentsAt,
+      });
+    }
+    return out;
+  },
+
   getStats() {
     // Outstanding flow work counts as loading: the paint race can leave a
     // TomTom request in flight after the roads have settled, and the shared

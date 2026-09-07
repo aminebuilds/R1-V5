@@ -6783,6 +6783,12 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: #22c55e;
 }
 
+/* No live flow reading for this site. Neutral, never green — green has to
+   mean "measured free flowing", not "we have not looked". */
+.site-status-pip.unmeasured {
+  color: var(--text-dim, #86868b);
+}
+
 #site-brief-empty {
   margin-top: 10px;
   font-family: var(--font-sans);

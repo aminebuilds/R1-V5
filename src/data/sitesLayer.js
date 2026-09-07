@@ -7,23 +7,33 @@ import {
 } from './contextStore.js';
 import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
 import { loadPortfolio, subscribePortfolio } from '../portfolio/portfolioStore.js';
+import { fetchSiteTraffic } from '../portfolio/siteTraffic.js';
+import {
+  initCompetitiveHeatmap,
+  renderHeatmapData,
+  setHeatmapMode,
+  getHeatmapMode,
+  toggleHeatmapVisibility,
+  isHeatmapVisible,
+} from '../portfolio/competitiveHeatmap.js';
 
 /**
  * @file The Banner OS "Portfolio Sites" data layer — Phase 0 of the Banner OS
- * spec. Unlike every other layer, this one has no live feed: sites come from
- * a user-imported CSV persisted in `src/portfolio/portfolioStore.js`
- * (localStorage), so `update()` is a no-op and rendering is driven by
- * `enable()` and by portfolio-change notifications instead of polling.
- *
- * Selection wiring is modeled on `src/data/militaryInstallations.js`: a
- * `Cesium.CustomDataSource`, one `ScreenSpaceEventHandler` click handler,
- * `registerEntityContext`/`selectEntityContext` from `contextStore.js` so a
- * click fires the same `gev:entity-selected` event every other layer uses.
+ * spec. Displays user-imported and dynamically discovered commercial networks,
+ * integrates live traffic congestion, and hosts the multi-mode Competitive &
+ * Traffic Radiant Heatmaps.
  * @module data/sitesLayer
  */
 
 const LAYER_ID = 'sites';
 const SITE_COLOR = Cesium.Color.fromCssColorString('#c2610c');
+
+/** How long a per-site flow reading stays usable before it is refetched. */
+const FLOW_TTL_MS = 2 * 60_000;
+/** Concurrent flow fetches. Each is one tile request through /api/tomtom. */
+const FLOW_CONCURRENCY = 4;
+/** Sites fetched per sweep — a large portfolio must not become a tile storm. */
+const FLOW_MAX_PER_SWEEP = 40;
 
 function createSitesLayer() {
   let _viewer = null;
@@ -34,9 +44,72 @@ function createSitesLayer() {
   let _selectedId = null;
   let _lastUpdate = null;
   let _heatmapEnabled = true;
+  /** @type {Map<string, {trafficLevel: number|null, closure: boolean, measuredAt: number}>} */
+  const _siteFlow = new Map();
+  let _flowSweepRunning = false;
+  let _flowAbort = null;
+
+  /**
+   * Fetch live flow for sites whose reading is missing or stale, then re-render
+   * so the dots recolour. Failures leave a site unmeasured (neutral) rather
+   * than substituting a value.
+   */
+  async function refreshSiteFlow() {
+    if (_flowSweepRunning || !_enabled) return;
+    const now = Date.now();
+    const due = loadPortfolio()
+      .filter((s) => s?.id && Number.isFinite(s.lat) && Number.isFinite(s.lon))
+      .filter((s) => {
+        const cached = _siteFlow.get(s.id);
+        return !cached || now - cached.measuredAt > FLOW_TTL_MS;
+      })
+      .slice(0, FLOW_MAX_PER_SWEEP);
+    if (due.length === 0) return;
+
+    _flowSweepRunning = true;
+    _flowAbort = new AbortController();
+    const { signal } = _flowAbort;
+    let changed = false;
+
+    try {
+      const queue = [...due];
+      const workers = Array.from({ length: Math.min(FLOW_CONCURRENCY, queue.length) }, async () => {
+        while (queue.length > 0) {
+          if (signal.aborted) return;
+          const site = queue.shift();
+          if (!site) return;
+          try {
+            const reading = await fetchSiteTraffic(site.lat, site.lon, { signal });
+            if (reading?.status === 'ready') {
+              _siteFlow.set(site.id, {
+                trafficLevel: reading.trafficLevel,
+                closure: Boolean(reading.closure),
+                roadType: reading.roadType || null,
+                measuredAt: Date.now(),
+              });
+              changed = true;
+            } else {
+              // Remember the miss so a keyless/uncovered site is not retried
+              // on every sweep — but store no level, so it stays unmeasured.
+              _siteFlow.set(site.id, { trafficLevel: null, closure: false, measuredAt: Date.now() });
+            }
+          } catch (error) {
+            if (error?.name === 'AbortError') return;
+          }
+        }
+      });
+      await Promise.all(workers);
+    } finally {
+      _flowSweepRunning = false;
+      _flowAbort = null;
+    }
+
+    if (changed && _enabled) renderSites();
+  }
 
   function renderSites() {
     if (!_dataSource) return;
+    _dataSource.entities.suspendEvents();
     _dataSource.entities.removeAll();
     removeEntityContextsForLayer(LAYER_ID);
 
@@ -45,34 +118,43 @@ function createSitesLayer() {
       if (!site?.id || !Number.isFinite(site.lat) || !Number.isFinite(site.lon)) continue;
       const isSelected = site.id === _selectedId;
 
-      // Congestion & access friction classification
-      const hash = Math.abs(Math.sin(site.lat * 12.9898 + site.lon * 78.233) * 43758.5453) % 1;
-      const isSevere = hash > 0.72;
-      const isModerate = hash > 0.40 && !isSevere;
+      // Congestion classification from the site's LIVE flow reading. Sites with
+      // no reading yet render neutral — green has to mean "measured free
+      // flowing", never "we have not looked". The previous build coloured every
+      // dot from `sin(lat·12.9898 + lon·78.233)`, so the most visible signal on
+      // the map was a hash of the coordinates.
+      const flow = _siteFlow.get(site.id) || null;
+      const level = flow && Number.isFinite(flow.trafficLevel) ? flow.trafficLevel : null;
+      const isUnknown = level === null;
+      const isSevere = !isUnknown && (flow.closure || level > 0.75);
+      const isModerate = !isUnknown && !isSevere && level > 0.45;
       const siteColor = isSelected
         ? Cesium.Color.WHITE
-        : isSevere
-          ? Cesium.Color.fromCssColorString('#ef4444')
-          : isModerate
-            ? Cesium.Color.fromCssColorString('#eab308')
-            : Cesium.Color.fromCssColorString('#22c55e');
+        : isUnknown
+          ? Cesium.Color.fromCssColorString('#8b98a3')
+          : isSevere
+            ? Cesium.Color.fromCssColorString('#ef4444')
+            : isModerate
+              ? Cesium.Color.fromCssColorString('#eab308')
+              : Cesium.Color.fromCssColorString('#22c55e');
 
       // 3D Site Point
       const entity = _dataSource.entities.add({
         id: site.id,
         position: Cesium.Cartesian3.fromDegrees(site.lon, site.lat),
         point: {
-          pixelSize: isSelected ? 14 : 10,
+          pixelSize: isSelected ? 15 : 11,
           color: siteColor,
-          outlineColor: Cesium.Color.BLACK.withAlpha(0.85),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
           outlineWidth: 1.5,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
 
-      // Radiant Congestion Heatmap Ring
-      if (_heatmapEnabled) {
+      // Congestion ring — only drawn where flow was actually measured. An
+      // unmeasured site gets no ring rather than a reassuring green one.
+      if (_heatmapEnabled && !isUnknown) {
         const glowColor = isSevere
           ? Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.24)
           : isModerate
@@ -111,10 +193,22 @@ function createSitesLayer() {
           format: site.format,
           externalRef: site.externalRef,
           openedAt: site.openedAt,
-          accessFriction: isSevere ? 'High Bottleneck' : isModerate ? 'Moderate Delay' : 'Free-Flowing Access',
+          // null, not a label, when nothing was measured for this site.
+          trafficLevel: level,
+          accessFriction: isUnknown
+            ? null
+            : isSevere ? 'High delay' : isModerate ? 'Moderate' : 'Smooth flow',
+          trafficMeasuredAt: flow?.measuredAt || null,
         },
       });
     }
+
+    // Refresh dynamic competitive heatmap
+    if (_heatmapEnabled) {
+      renderHeatmapData({ clientSites: sites });
+    }
+
+    _dataSource.entities.resumeEvents();
 
     const selectedEntity = _selectedId ? _dataSource.entities.getById(_selectedId) : null;
     if (selectedEntity) selectEntityContext(selectedEntity);
@@ -124,12 +218,23 @@ function createSitesLayer() {
 
   function setHeatmapVisible(visible) {
     _heatmapEnabled = Boolean(visible);
+    toggleHeatmapVisibility(_heatmapEnabled);
     renderSites();
   }
 
   function toggleHeatmap() {
     setHeatmapVisible(!_heatmapEnabled);
     return _heatmapEnabled;
+  }
+
+  function cycleHeatmapMode() {
+    const modes = ['traffic', 'competitor', 'opportunity'];
+    const current = getHeatmapMode();
+    const nextIdx = (modes.indexOf(current) + 1) % modes.length;
+    const nextMode = modes[nextIdx];
+    setHeatmapMode(nextMode);
+    renderHeatmapData({ clientSites: loadPortfolio(), mode: nextMode });
+    return nextMode;
   }
 
   function fitPortfolioBounds(sites = loadPortfolio()) {
@@ -201,46 +306,102 @@ function createSitesLayer() {
     id: LAYER_ID,
     name: 'Portfolio Sites',
     icon: '◈',
-    source: 'Imported CSV',
-    updateInterval: 0,
+    source: 'Commercial Network',
+    // Per-site flow readings expire; the manager's poll drives the refresh.
+    updateInterval: 60_000,
 
     init(viewer) {
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('sites');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
+      initCompetitiveHeatmap(viewer);
       installClickHandler(viewer);
       _unsubscribePortfolio = subscribePortfolio(() => {
-        if (_enabled) renderSites();
+        if (!_enabled) return;
+        renderSites();
+        refreshSiteFlow();
       });
     },
 
     enable() {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
+      toggleHeatmapVisibility(_heatmapEnabled);
       registerPickOwner(LAYER_ID, (id) => Boolean(_dataSource?.entities.getById(id)));
       renderSites();
+      refreshSiteFlow();
     },
 
     disable() {
       _enabled = false;
       if (_dataSource) _dataSource.show = false;
+      toggleHeatmapVisibility(false);
       unregisterPickOwner(LAYER_ID);
       clearSelectedEntityContextForLayer(LAYER_ID);
+      if (_flowAbort) _flowAbort.abort();
     },
 
-    /** No live feed to poll — rendering is import- and enable-driven. */
+    /** Refreshes the per-site live flow readings that colour the dots. */
     update() {
+      refreshSiteFlow();
       return true;
+    },
+
+    /** Live flow readings by site id — read by the view-health rollup. */
+    getSiteFlow() {
+      return new Map(_siteFlow);
+    },
+
+    /**
+     * Portfolio sites as analyst records, joined to whatever has actually been
+     * measured for them. Unmeasured fields are `null`, never a stand-in, so a
+     * query like "sites with congestion above 0.7" can only ever match sites
+     * that were really read.
+     * @param {number} [limit]
+     * @returns {object[]}
+     */
+    getAnalystRecords(limit = 5000) {
+      const sites = loadPortfolio();
+      const out = [];
+      for (const site of sites) {
+        if (out.length >= limit) break;
+        if (!site?.id || !Number.isFinite(site.lat) || !Number.isFinite(site.lon)) continue;
+        const flow = _siteFlow.get(site.id) || null;
+        const level = flow && Number.isFinite(flow.trafficLevel) ? flow.trafficLevel : null;
+        out.push({
+          id: site.id,
+          name: site.name,
+          address: site.address || null,
+          brand: site.brand || null,
+          format: site.format || null,
+          lat: site.lat,
+          lon: site.lon,
+          trafficLevel: level,
+          roadType: flow?.roadType || null,
+          isClosure: Boolean(flow?.closure),
+          hasLiveFlow: level !== null,
+          congestionScore: level === null ? null : Math.round(level * 100),
+          accessFriction: level === null
+            ? null
+            : flow.closure ? 'Closed' : level > 0.75 ? 'High delay' : level > 0.45 ? 'Moderate' : 'Smooth flow',
+          measuredAt: flow?.measuredAt || null,
+          isCompetitor: Boolean(site.isCompetitor),
+        });
+      }
+      return out;
     },
 
     focusSite,
     fitPortfolioBounds,
     setHeatmapVisible,
     toggleHeatmap,
+    cycleHeatmapMode,
 
     destroy(viewer) {
       _enabled = false;
+      if (_flowAbort) _flowAbort.abort();
+      _siteFlow.clear();
       unregisterPickOwner(LAYER_ID);
       clearSelectedEntityContextForLayer(LAYER_ID);
       removeEntityContextsForLayer(LAYER_ID);
@@ -248,21 +409,16 @@ function createSitesLayer() {
         _unsubscribePortfolio();
         _unsubscribePortfolio = null;
       }
-      _clickHandler?.destroy();
-      _clickHandler = null;
-      if (_dataSource && viewer) viewer.dataSources.remove(_dataSource, true);
-      _dataSource = null;
-      _selectedId = null;
-      _lastUpdate = null;
+      if (_clickHandler) {
+        _clickHandler.destroy();
+        _clickHandler = null;
+      }
+      if (_dataSource && viewer?.dataSources) {
+        viewer.dataSources.remove(_dataSource, true);
+        _dataSource = null;
+      }
       _viewer = null;
-    },
-
-    getStats() {
-      return {
-        count: _dataSource ? _dataSource.entities.values.length : 0,
-        lastUpdate: _lastUpdate,
-        error: null,
-      };
+      _selectedId = null;
     },
   };
 

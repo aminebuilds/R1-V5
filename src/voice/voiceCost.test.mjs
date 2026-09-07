@@ -55,7 +55,7 @@ const dollarsOfUsage = (usd) => ({
 
 test('registry exposes exactly the two tiers the UI offers', () => {
   assert.deepEqual([...VOICE_TIERS].sort(), ['mini', 'standard']);
-  assert.equal(DEFAULT_VOICE_TIER, 'standard');
+  assert.equal(DEFAULT_VOICE_TIER, 'mini');
 });
 
 test('standard tier still points at the model vite.config.js defaults to', () => {
@@ -92,7 +92,7 @@ test('resolveVoiceModel tolerates case and whitespace', () => {
   assert.equal(resolveVoiceModel('Standard').tier, 'standard');
 });
 
-test('unknown, empty, and hostile tiers fall back to standard rather than throwing', () => {
+test('unknown, empty, and hostile tiers fall back to the default tier rather than throwing', () => {
   // This is the guard that keeps an arbitrary querystring out of the OpenAI
   // model field. Every one of these must resolve, never throw.
   for (const bad of [
@@ -111,8 +111,8 @@ test('unknown, empty, and hostile tiers fall back to standard rather than throwi
     true,
   ]) {
     const resolved = resolveVoiceModel(bad);
-    assert.equal(resolved.tier, 'standard', `fallback for ${JSON.stringify(bad)}`);
-    assert.equal(resolved.id, 'gpt-realtime-2');
+    assert.equal(resolved.tier, 'mini', `fallback for ${JSON.stringify(bad)}`);
+    assert.equal(resolved.id, 'gpt-realtime-2.1-mini');
   }
 });
 
@@ -445,10 +445,10 @@ test('the tracker reports the model it is charging against', () => {
   assert.equal(state.modelId, 'gpt-realtime-2.1-mini');
 });
 
-test('an unknown tier tracks at standard rates rather than free', () => {
+test('an unknown tier tracks at the default tier rates rather than free', () => {
   // Charging $0 for an unrecognised tier would silently disable the cap.
   const tracker = createVoiceCostTracker({ tier: 'nonsense' });
-  assert.equal(tracker.state().tier, 'standard');
+  assert.equal(tracker.state().tier, 'mini');
   assert.ok(tracker.record(FULL_USAGE).totalUsd > 0);
 });
 

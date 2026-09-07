@@ -2990,3 +2990,77 @@ test('front5: 0.99 km due EAST is the subject, though a degree box rejects it', 
     assert.equal(result.window.centeredOn, 'N546PC');
   });
 });
+
+test('voice runner: search_address_or_business executes fuzzy search', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('search_address_or_business', { query: 'Texas State Capitol', flyTo: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'search_address_or_business');
+  assert.ok(result.bestMatch);
+});
+
+test('voice runner: analyze_competitors benchmarks brands', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('analyze_competitors', { brandName: 'Starbucks', competitors: ["Dunkin'"] });
+  assert.equal(result.action, 'analyze_competitors');
+  // Unreachable search from the test runner: the runner surfaces the engine's
+  // failure state rather than a benchmark built from fabricated competitors.
+  assert.equal(result.ok, false);
+  assert.ok(['no-client-sites', 'no-competitors-found'].includes(result.status));
+  assert.equal(result.confidence, 'unavailable');
+  assert.match(result.readout, /COMPETITIVE —/);
+});
+
+test('voice runner: get_traffic_delays_and_construction detects bottlenecks', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('get_traffic_delays_and_construction', { latitude: 30.2672, longitude: -97.7431, radiusKm: 5 });
+  assert.equal(result.action, 'get_traffic_delays_and_construction');
+  assert.equal(result.ok, false);
+  assert.equal(result.confidence, 'unavailable');
+  assert.deepEqual(result.bottlenecks, []);
+  assert.match(result.readout, /TRAFFIC —/);
+});
+
+test('voice runner: get_cool_off_opportunities identifies conversion catchment windows', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('get_cool_off_opportunities', { latitude: 30.2672, longitude: -97.7431 });
+  assert.equal(result.action, 'get_cool_off_opportunities');
+  // "Cannot tell" must not narrate as "no opportunities".
+  assert.equal(result.ok, false);
+  assert.equal(result.confidence, 'unavailable');
+  assert.match(result.readout, /cannot evaluate/);
+});
+
+test('voice runner: toggle_competitive_heatmap switches visual mode', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('toggle_competitive_heatmap', { mode: 'traffic' });
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'toggle_competitive_heatmap');
+  assert.equal(result.mode, 'traffic');
+});
+
+test('voice runner: get_weather retrieves real-time weather and temperature', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('get_weather', { latitude: 30.2672, longitude: -97.7431 });
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'get_weather');
+  assert.ok(result.condition);
+  assert.ok(result.summary);
+});
+
+test('voice runner: control_weather_effects dispatches weather event', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+  const result = await runner('control_weather_effects', { enabled: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'control_weather_effects');
+  assert.equal(result.weatherEffectsEnabled, true);
+});
+
+

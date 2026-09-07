@@ -33,6 +33,21 @@ export const ANALYST_LAYERS = {
   'ais-live-vessels': { numeric: ['speedKts', 'courseDeg'], text: ['name', 'mmsi', 'shipType', 'destination', 'navStatus'], flags: [] },
   'local-firms': { numeric: ['frp'], text: ['confidence', 'satellite'], flags: [] },
   earthquakes: { numeric: ['magnitude', 'depthKm'], text: ['place'], flags: [] },
+  // Retail. `sites` is the operator's own portfolio joined to whatever has
+  // been measured for each location; `traffic` is the live congestion already
+  // rendered on screen. Both were absent, which is why "how is this view
+  // doing?" had no answer — the engine could see aircraft over a forecourt but
+  // not the forecourt.
+  sites: {
+    numeric: ['trafficLevel', 'congestionScore', 'priceCents', 'priceVsAnchorCents'],
+    text: ['name', 'address', 'brand', 'format', 'roadType', 'accessFriction'],
+    flags: ['isCompetitor', 'hasLiveFlow', 'isClosure', 'hasLivePrice'],
+  },
+  traffic: {
+    numeric: ['delayMin', 'frustrationScore', 'trafficLevel', 'speedMph', 'lengthM'],
+    text: ['roadType', 'delayStatus'],
+    flags: ['isClosure', 'isConstruction'],
+  },
 };
 
 const EARTH_R_KM = 6371;

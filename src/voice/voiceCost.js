@@ -9,7 +9,7 @@
  *   3. unit tests (`voiceCost.test.mjs`)
  *
  * Two independent concerns live here:
- *   - MODEL TIERS: 'standard' (default) vs 'mini' (cheaper). The client asks
+ *   - MODEL TIERS: 'standard' vs 'mini' (default, cheaper). The client asks
  *     for a tier by NAME; only this module maps a tier to an OpenAI model id,
  *     so an unknown/hostile tier string can never reach the OpenAI API.
  *   - SPEND GUARD: token usage → USD, with a soft warning and a hard cap.
@@ -82,7 +82,7 @@ export const VOICE_MODELS = Object.freeze({
 });
 
 /** The tier used when nothing (or nonsense) was requested. */
-export const DEFAULT_VOICE_TIER = 'standard';
+export const DEFAULT_VOICE_TIER = 'mini';
 
 /** Every tier name the UI and the token endpoint accept. */
 export const VOICE_TIERS = Object.freeze(Object.keys(VOICE_MODELS));

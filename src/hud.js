@@ -14,7 +14,8 @@
  */
 
 import * as Cesium from 'cesium';
-import { forward as toMGRS } from 'mgrs';
+import * as mgrsModule from 'mgrs';
+const toMGRS = mgrsModule.forward || mgrsModule;
 import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
 import { ellipsoidalToMslDisplayM, ensureGeoidReady, geoidHeight } from './data/geoid.js';

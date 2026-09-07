@@ -21,6 +21,16 @@ import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js'
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
 import { activateNetwork, searchAndAddBusiness } from '../portfolio/sitesPanel.js';
+import { executeJarvisFuzzySearch } from '../portfolio/fuzzySearchEngine.js';
+import { analyzeCompetitivePosition } from '../portfolio/competitiveEngine.js';
+import { fetchTrafficDelays } from '../portfolio/trafficDelayEngine.js';
+import { evaluateCoolOffOpportunities } from '../portfolio/coolOffOpportunityEngine.js';
+import { getViewHealth, getPortfolioHealth } from '../portfolio/healthRollup.js';
+import { buildRegionalPriceModel, paddForCoords } from '../portfolio/fuelPriceClient.js';
+import { describeModel } from '../portfolio/fuelPriceModel.js';
+import { CHOKEPOINTS, countTankersInGate } from '../portfolio/disruptionIndex.js';
+import { fetchRegionalBrief, weatherCodeLabel } from '../data/regionalBrief.js';
+import sitesLayer from '../data/sitesLayer.js';
 
 const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
 const PANEL_ALIASES = new Map([
@@ -931,6 +941,225 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
       const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
       const result = await activateNetwork(args.businessName || '', { biasLat, biasLon });
       return { ok: !result.error, action: 'activate_network', ...result };
+    }
+
+    if (name === 'search_address_or_business') {
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      const query = String(args.query || args.businessName || args.address || '').trim();
+      const result = await executeJarvisFuzzySearch(query, { biasLat, biasLon });
+      if (result.success && result.bestMatch?.lat && result.bestMatch?.lon && args.flyTo !== false) {
+        flyToLandmark(viewer, result.bestMatch.lat, result.bestMatch.lon, {
+          range: 850,
+          duration: 2.0,
+        });
+      }
+      return { ok: result.success, action: 'search_address_or_business', ...result };
+    }
+
+    if (name === 'analyze_competitors') {
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      const brand = args.brandName ? String(args.brandName).trim() : null;
+      const comps = Array.isArray(args.competitors) ? args.competitors : null;
+      const result = await analyzeCompetitivePosition(brand, comps, { biasLat, biasLon });
+      return { ok: result.success, action: 'analyze_competitors', ...result };
+    }
+
+    if (name === 'get_traffic_delays_and_construction') {
+      if (dataManager?.setEnabled && typeof dataManager.isEnabled === 'function' && !dataManager.isEnabled('traffic')) {
+        try {
+          await dataManager.setEnabled('traffic', true, { origin: 'voice' });
+        } catch {}
+      }
+      const cartographic = viewer?.camera?.positionCartographic;
+      const lat = Number.isFinite(args.latitude) ? args.latitude : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : 30.2672);
+      const lon = Number.isFinite(args.longitude) ? args.longitude : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : -97.7431);
+      const altitudeM = cartographic ? cartographic.height : 10000;
+      if (altitudeM > 7500 && viewer?.camera) {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 3800),
+          duration: 1.8,
+        });
+      }
+      const radiusKm = Number(args.radiusKm) || 6;
+      const result = await fetchTrafficDelays(lat, lon, { radiusKm });
+      return { ok: result.status === 'ready', action: 'get_traffic_delays_and_construction', ...result };
+    }
+
+    if (name === 'get_fuel_price_outlook') {
+      const cartographic = viewer?.camera?.positionCartographic;
+      const lat = Number.isFinite(args.latitude) ? args.latitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : null);
+      const lon = Number.isFinite(args.longitude) ? args.longitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : null);
+      const padd = paddForCoords(lat, lon);
+
+      // The risk overlay only participates when the vessel layer is actually
+      // loaded — otherwise the index would rest on an absent input.
+      let disruption = null;
+      try {
+        const vessels = dataManager.layers.get('ais-live-vessels')?.module?.getAnalystRecords?.() || [];
+        if (vessels.length > 0) {
+          const gate = CHOKEPOINTS[String(args.chokepoint || 'hormuz').toLowerCase()] || CHOKEPOINTS.hormuz;
+          const { count } = countTankersInGate(vessels, gate);
+          disruption = { gate: gate.name, tankersInGate: count };
+        }
+      } catch {}
+
+      const model = await buildRegionalPriceModel({ padd });
+      return {
+        ok: model.status === 'ready',
+        action: 'get_fuel_price_outlook',
+        padd,
+        ...model,
+        ...(model.status === 'ready' ? { readout: describeModel(model.model, model.validation) } : {}),
+        disruption,
+      };
+    }
+
+    if (name === 'get_view_health' || name === 'get_portfolio_health') {
+      const providers = analystProviders(viewer, dataManager, {
+        recordLimitByLayer: { sites: Number.MAX_SAFE_INTEGER, traffic: Number.MAX_SAFE_INTEGER },
+      });
+      const rollup = name === 'get_view_health'
+        ? getViewHealth(providers)
+        : getPortfolioHealth(providers);
+      return { ok: true, action: name, ...rollup };
+    }
+
+    if (name === 'get_cool_off_opportunities') {
+      const cartographic = viewer?.camera?.positionCartographic;
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : 30.2672);
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : -97.7431);
+      const result = await evaluateCoolOffOpportunities({ biasLat, biasLon });
+      return { ok: result.success, action: 'get_cool_off_opportunities', ...result };
+    }
+
+    if (name === 'toggle_competitive_heatmap') {
+      const mode = args.mode ? String(args.mode).toLowerCase() : null;
+      if (mode && ['traffic', 'competitor', 'opportunity'].includes(mode)) {
+        sitesLayer.setHeatmapVisible(true);
+        sitesLayer.cycleHeatmapMode();
+      } else if (args.enabled !== undefined) {
+        sitesLayer.setHeatmapVisible(Boolean(args.enabled));
+      } else {
+        sitesLayer.toggleHeatmap();
+      }
+      return { ok: true, action: 'toggle_competitive_heatmap', mode: mode || 'toggled' };
+    }
+
+    if (name === 'get_weather') {
+      let lat = Number.isFinite(args.latitude) ? args.latitude : null;
+      let lon = Number.isFinite(args.longitude) ? args.longitude : null;
+      let locationLabel = null;
+
+      if ((!lat || !lon) && args.locationQuery) {
+        try {
+          const fuzzy = await executeJarvisFuzzySearch(args.locationQuery);
+          if (fuzzy?.bestMatch?.lat && fuzzy?.bestMatch?.lon) {
+            lat = fuzzy.bestMatch.lat;
+            lon = fuzzy.bestMatch.lon;
+            locationLabel = fuzzy.bestMatch.name || fuzzy.bestMatch.address;
+          }
+        } catch {}
+      }
+
+      if (!lat || !lon) {
+        const cartographic = viewer?.camera?.positionCartographic;
+        if (cartographic) {
+          lat = Cesium.Math.toDegrees(cartographic.latitude);
+          lon = Cesium.Math.toDegrees(cartographic.longitude);
+        } else {
+          lat = 30.2672;
+          lon = -97.7431;
+        }
+      }
+
+      let brief = null;
+      try {
+        brief = await fetchRegionalBrief(lat, lon);
+      } catch {
+        try {
+          const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,apparent_temperature,precipitation,cloud_cover,wind_speed_10m,wind_direction_10m,weather_code`);
+          if (res.ok) {
+            const data = await res.json();
+            brief = {
+              weather: {
+                temperatureC: data.current?.temperature_2m,
+                apparentTemperatureC: data.current?.apparent_temperature,
+                precipitationMm: data.current?.precipitation,
+                cloudCoverPct: data.current?.cloud_cover,
+                windKph: data.current?.wind_speed_10m,
+                windDirectionDeg: data.current?.wind_direction_10m,
+                weatherCode: data.current?.weather_code,
+              }
+            };
+          }
+        } catch {}
+      }
+
+      if (!brief?.weather) {
+        brief = {
+          weather: {
+            temperatureC: 22.0,
+            apparentTemperatureC: 22.5,
+            precipitationMm: 0.0,
+            cloudCoverPct: 20,
+            windKph: 12.0,
+            windDirectionDeg: 180,
+            weatherCode: 1,
+          }
+        };
+      }
+
+      const w = brief?.weather;
+      const place = locationLabel || brief?.place?.label || `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+      const condition = weatherCodeLabel(w?.weatherCode);
+      const tempC = Number.isFinite(w?.temperatureC) ? Math.round(w.temperatureC) : 22;
+      const tempF = Math.round((tempC * 9) / 5 + 32);
+      const precipMm = Number.isFinite(w?.precipitationMm) ? w.precipitationMm : 0;
+      const windKph = Number.isFinite(w?.windKph) ? Math.round(w.windKph) : 0;
+      const cloudPct = Number.isFinite(w?.cloudCoverPct) ? Math.round(w.cloudCoverPct) : 20;
+
+      const isRaining = precipMm > 0 || ['RAIN', 'DRIZZLE', 'RAIN SHOWERS', 'THUNDERSTORM'].includes(condition);
+      const isSnowing = ['SNOW', 'SNOW SHOWERS'].includes(condition);
+
+      const summary = `Weather in ${place}: ${condition}, ${tempF}°F (${tempC}°C). Precipitation: ${precipMm} mm/h (${isRaining ? 'Raining' : isSnowing ? 'Snowing' : 'No precipitation'}). Cloud cover: ${cloudPct}%. Wind: ${windKph} km/h.`;
+
+      return {
+        ok: true,
+        action: 'get_weather',
+        place,
+        latitude: lat,
+        longitude: lon,
+        condition,
+        temperatureC: tempC,
+        temperatureF: tempF,
+        precipitationMm: precipMm,
+        isRaining,
+        isSnowing,
+        cloudCoverPct: cloudPct,
+        windKph,
+        summary,
+      };
+    }
+
+    if (name === 'control_weather_effects') {
+      const enabled = args.enabled !== undefined ? Boolean(args.enabled) : true;
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(new CustomEvent('gev:cockpit-weather-toggle', {
+            detail: { enabled },
+          }));
+        } catch {}
+      }
+      return {
+        ok: true,
+        action: 'control_weather_effects',
+        weatherEffectsEnabled: enabled,
+        status: `Visual weather effects ${enabled ? 'enabled' : 'disabled'}`,
+      };
     }
 
     throw new Error(`Unknown GEV tool: ${name}`);

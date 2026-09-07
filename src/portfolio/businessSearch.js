@@ -98,8 +98,11 @@ export async function searchOverpassSites(brandName, { biasLat = 30.2672, biasLo
 );
 out body 40;`;
 
+  // Through the server proxy, never straight to overpass-api.de: SECURITY.md
+  // requires every third-party fetch to go via Vite middleware, which is also
+  // where the QL sanitizer, the shared cache, and the rate limiter live.
   try {
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
+    const res = await fetch('/api/overpass', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `data=${encodeURIComponent(query)}`,
@@ -108,7 +111,8 @@ out body 40;`;
     if (!res.ok) return [];
     const data = await res.json().catch(() => null);
     return Array.isArray(data?.elements) ? data.elements : [];
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     return [];
   }
 }

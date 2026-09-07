@@ -116,13 +116,16 @@ async function init() {
         document.body.appendChild(el);
         return el;
       })(),
-      msaaSamples: 4,
+      msaaSamples: 2,
       contextOptions: {
         webgl: {
           preserveDrawingBuffer: true,
         },
       },
     });
+
+    // High-DPI fill rate optimization: cap resolutionScale at 1.25 to prevent 4K/Retina GPU stalls
+    viewer.resolutionScale = Math.min(1.25, Math.max(1.0, window.devicePixelRatio || 1.0));
 
     // Cap the default render loop at 60 fps. Cesium's loop otherwise runs at
     // the display's refresh rate — 120 Hz on ProMotion panels — doubling GPU
@@ -144,6 +147,7 @@ async function init() {
     // globe at all LODs (street level → orbital). The default globe's 2D imagery
     // clips through 3D tile buildings at close range.
     viewer.scene.globe.show = false;
+    viewer.scene.globe.tileCacheSize = 120;
 
     // Keep a sky behind Google 3D Tiles, but soften Cesium's high-intensity
     // default atmosphere. With the globe hidden its bright limb otherwise
@@ -160,6 +164,14 @@ async function init() {
       tileset = await Cesium.createGooglePhotorealistic3DTileset({
         onlyUsingWithGoogleGeocoder: true,
       });
+      // Optimize 3D Tiles memory footprint and dynamic screen space error for multi-layer smoothness
+      tileset.dynamicScreenSpaceError = true;
+      tileset.dynamicScreenSpaceErrorDensity = 0.00278;
+      tileset.dynamicScreenSpaceErrorFactor = 4.0;
+      tileset.dynamicScreenSpaceErrorHeightFalloff = 0.25;
+      tileset.maximumMemoryUsage = 512;
+      tileset.cullWithChildrenBounds = true;
+
       viewer.scene.primitives.add(tileset);
       // NOTE: Cesium World Terrain intentionally disabled — conflicts with Google 3D Tiles at high zoom.
       // Google Photorealistic 3D Tiles provide their own terrain/elevation.

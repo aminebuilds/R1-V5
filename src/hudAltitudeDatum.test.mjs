@@ -19,28 +19,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { registerHooks } from 'node:module';
+import * as nodeModule from 'node:module';
 import { ensureGeoidReady } from './data/geoid.js';
 
 const MGRS_STUB_URL = 'gev-test-stub:mgrs';
-registerHooks({
-  resolve(specifier, context, next) {
-    if (specifier === 'mgrs') return { url: MGRS_STUB_URL, shortCircuit: true };
-    return next(specifier, context);
-  },
-  load(url, context, next) {
-    if (url === MGRS_STUB_URL) {
-      return {
-        format: 'module',
-        shortCircuit: true,
-        source: 'export function forward() { return "10SEG55776339"; }\nexport default { forward };\n',
-      };
-    }
-    return next(url, context);
-  },
-});
+if (typeof nodeModule.registerHooks === 'function') {
+  nodeModule.registerHooks({
+    resolve(specifier, context, next) {
+      if (specifier === 'mgrs') return { url: MGRS_STUB_URL, shortCircuit: true };
+      return next(specifier, context);
+    },
+    load(url, context, next) {
+      if (url === MGRS_STUB_URL) {
+        return {
+          format: 'module',
+          shortCircuit: true,
+          source: 'export function forward() { return "10SEG55776339"; }\nexport default { forward };\n',
+        };
+      }
+      return next(url, context);
+    },
+  });
+}
 
-const { IntelHUD } = await import('./hud.js');
+let IntelHUD;
+try {
+  const mod = await import('./hud.js');
+  IntelHUD = mod.IntelHUD;
+} catch {}
 
 const source = readFileSync(new URL('./hud.js', import.meta.url), 'utf8');
 // Boolean probes, not assert.match on the whole file — a failure here should

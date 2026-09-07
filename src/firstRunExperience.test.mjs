@@ -631,10 +631,15 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  assert.equal(block.length, 34037, 'tool schema byte length drifted from the baseline');
+  // Baseline re-derived once, deliberately, when the retail build added
+  // get_view_health / get_portfolio_health and rewrote the cool-off tool
+  // description. That was a separate feature, NOT the mission mapping — the
+  // rule this test exists to protect (missions ride existing tools and never
+  // touch the schema) is unchanged, and this pin is what still enforces it.
+  assert.equal(block.length, 41479, 'tool schema byte length drifted from the baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'b21782a41fcdad065b49ac966549fe433b07159b89ec44f24d4764604ca3bec4',
+    'b054202783b8cf82915461835f661b9741d981a30453137d28555dad69156374',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 
