@@ -21,6 +21,7 @@ import { COMPOSED_ACTIONS, composeForAction, composePending } from './composers.
 import { gap, head, withIds } from './blocks.js';
 import { renderExplain } from './render.js';
 import { routeQuestion, SUGGESTIONS } from './askRouter.js';
+import { clearMapKeys, collectMapKeys, destroyMapKeys, initMapKeys, syncMapKeys } from './mapKeys.js';
 
 /** Actions that open a board. Camera moves and layer toggles do not. */
 const EXPLAINABLE = new Set(COMPOSED_ACTIONS);
@@ -83,6 +84,9 @@ export function closeExplainBoard() {
   if (!_dom?.board) return;
   _dom.board.hidden = true;
   document.body.classList.remove('explain-open');
+  // Keys belong to the board being read. A closed board leaves no letters on
+  // the map for the operator to wonder about.
+  clearMapKeys();
   // The tab is the permanent way in — the ask box lives inside the board, so
   // hiding both would leave a typed question with no front door at all.
   if (_dom.reopenBtn) _dom.reopenBtn.hidden = false;
@@ -149,6 +153,9 @@ function onStreamState(state) {
   renderExplain(_dom.body, state, { onFocus: focusOnTarget });
   renderSteps(state);
   renderRunState(state);
+  // The globe carries the same letters the board just printed, so a ranked row
+  // and the dot it describes are one thing rather than two.
+  syncMapKeys(collectMapKeys(state.blocks));
 }
 
 /**
@@ -243,6 +250,7 @@ export function initExplainBoard({ viewer, runAction = null } = {}) {
 
   _viewer = viewer || null;
   _runAction = runAction;
+  initMapKeys(_viewer);
   _stream = createExplainStream();
   _unsubscribeStream = _stream.subscribe(onStreamState);
 
@@ -298,6 +306,7 @@ export function destroyExplainBoard() {
   _unsubscribeBus = null;
   _unsubscribeStream = null;
   _stream = null;
+  destroyMapKeys();
   _viewer = null;
   _runAction = null;
   if (_dom?.body) _dom.body.replaceChildren();

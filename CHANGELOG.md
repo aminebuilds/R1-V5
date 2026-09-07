@@ -5,6 +5,29 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ## [Unreleased] — 2026-09-06
 
+### Added
+
+- **The explain board** — answers and recommendations are now composed as a
+  visual document instead of a single sentence. Ask a question in the board's
+  own ask box, or trigger any of the seven analysis tools by voice, and the
+  right-hand board draws the reasoning: the verdict and the kind of claim it
+  is, the measured readouts behind it, a stage diagram of how it was reached,
+  a chain-of-custody table naming the engine and provenance of every clause,
+  ranked rows and per-site tiles that fly the camera when clicked, forecast
+  bands, and play cards showing which thresholds fired. Every figure declares
+  whether it was **measured**, **derived**, **ranked**, **modelled**,
+  **parameterised** or **unmeasured**; a feed that cannot answer produces a
+  "cannot tell" block naming what is missing, never a reassuring summary.
+  Collapses to an edge tab; expands to a two-column board. New modules under
+  [`src/explain/`](src/explain/), styled per [DESIGN-V5](docs/DESIGN-V5.md).
+- **Lettered map keys.** The letters beside a board's ranked rows are drawn at
+  those subjects' coordinates on the globe, so a claim and the dot it describes
+  read as one thing. Keys clear when the board closes.
+- Typed questions route through the same action runner voice uses
+  (`ensureActionRunner` in `src/voice/r1Actions.js`), so the console still
+  answers with the mic off. A question that maps onto no capability is declined
+  with the list of answerable ones rather than guessed at.
+
 ### Changed
 
 - **The project is now R.1 — Commercial Intelligence, a standalone product.**

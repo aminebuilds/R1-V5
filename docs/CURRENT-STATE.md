@@ -2559,6 +2559,87 @@ Reconstructed mission orbits use a small downrange launch-to-insertion arc, so t
 Collapsed right-rail controls use the same 176 px width as collapsed left-rail controls, while expanded right-side detail panels retain their independent widths. DISPLAY starts expanded only on first run and then respects persistence; DISPLAY may remain open beside CCTV or Context, while CCTV and Context remain mutually exclusive without persisting forced collapses. Selecting a dedicated Context mode opens its right-side surface and clears unrelated layers after first snapshotting their exact state. Final exit restores the original enabled set and changed parameters. Cockpit View hides the right-side CCTV control because CCTV is not part of the cockpit rail. Airborne cockpit altitude uses the tracked aircraft's reported aviation MSL altitude, never the potentially negative Cesium terrain/ellipsoid render height; confirmed grounded contacts display `0 ft` without rewriting that source field. A cold photoreal floor shows `ACQUIRING SURFACE` for at most five seconds, then uses the source target-height fallback instead of freezing the camera indefinitely.
 Replay transport uses one Play/Pause toggle plus Cancel. During ascent only the active thrust ring is visible; stage-recovery handoff uses a pulsing dot.
 
+## Explain Board (`src/explain/`)
+
+The surface that answers "why". Every retail engine already returned an honest
+result — `null` where nothing was measured, a `confidence` on everything else —
+but that collapsed into one spoken sentence, which threw away the part an
+operator needs to act: what the claim rests on. The board renders it.
+
+### Shape
+
+| Module | Role |
+|---|---|
+| `blocks.js` | The block vocabulary and the `PROVENANCE` set. Pure data; also the single place a `null` becomes an em dash. |
+| `agui.js` | AG-UI-shaped event stream — `RUN_STARTED`, `STEP_*`, `CUSTOM` block payloads, `STATE_DELTA` (RFC 6902), `RUN_FINISHED` — plus the reducer that folds them into one document. No dependency; the shape is the protocol's so a server-sent transport can replace the local emitter without touching the renderer. |
+| `composers.js` | Engine result → blocks, one composer per question. Pure and node-tested. |
+| `askRouter.js` | Typed question → action. Keyword routing, and an explicit decline when nothing matches. |
+| `render.js` | Blocks → DOM, reconciling by block id so a late-arriving block does not redraw the board. |
+| `board.js` | Panel lifecycle, ask box, stream wiring, camera hand-off. The only file here that touches the viewer. |
+| `bus.js` | One-way publish from the action runner, so `r1Actions.js` never imports the board. |
+| `mapKeys.js` | Draws the board's lettered keys at their subjects' coordinates. Collection is pure; only the sync half touches Cesium. |
+
+### The provenance contract
+
+Every figure on a board declares its kind, and the kind selects the only colour
+in the block: `measured` and `derived` (signal), `ranked`, `modelled` and
+`parameterised` (caution), `unmeasured` (ghost), `unavailable` (alert). An
+engine's own confidence string is translated in exactly one place —
+`provenanceForConfidence()`.
+
+An unavailable feed produces a `gap` block naming what is missing and what would
+fix it. It never produces an empty board that reads as "no issues": "cannot
+tell" and "nothing found" are different answers and the board keeps them apart.
+
+### Block vocabulary
+
+`head` · `verdict` · `readouts` · `evidence` · `chain` · `ranked` ·
+`multiples` · `band` · `plays` · `coverage` · `sources` · `gap` · `note`.
+
+`evidence` is the narration contract from
+[RETAIL-FUEL-INTELLIGENCE.md](RETAIL-FUEL-INTELLIGENCE.md) §05.3 made visible:
+one row per clause of the answer, each naming the engine that produced it and
+the kind of claim it is. `plays` shows each threshold from `playLibrary.js`
+against the value that was actually measured, so a recommendation reads as a
+lookup rather than a sentence a model wrote — including its unmeasured lift and
+its approval requirement.
+
+### Composed questions
+
+`get_cool_off_opportunities`, `get_view_health`, `get_portfolio_health`,
+`get_fuel_price_outlook`, `analyze_competitors`,
+`get_traffic_delays_and_construction`, `analyst_query`. Any other action falls
+back to `composeGeneric`, which still produces a header, a verdict and a source
+row. Only the composed set opens the board — a camera move is not an
+explanation.
+
+### Front doors
+
+- **Typed.** The ask box in the board header routes through `askRouter` and the
+  shared action runner. An unroutable question is declined with the list of
+  questions the console can answer.
+- **Voice.** `ensureActionRunner()` wraps the runner `r1Realtime` already uses
+  and publishes each result on the bus, so a spoken question draws the same
+  board. The runner is memoised because `createR1ActionRunner` installs the
+  camera verbs and the view-target prewarm, which must happen once.
+
+### Surface behaviour
+
+Docked to the right edge, full height, opaque, radius 0. Two widths: a reading
+rail (`min(460px, 92vw)`) and a full board (`min(940px, 96vw)`, two columns).
+While the rail width is open the right context rail steps aside via
+`--right-rail-x`; at board width it collapses, because the board is then the
+context region. Closing leaves the `EXPLAIN` edge tab, which is also the way in
+for the first typed question. Hidden in clean-view.
+
+Rows and tiles carrying coordinates are focusable and fly the camera to their
+subject.
+
+The same rows also place lettered badges on the globe (the `explain-keys` data
+source): one per keyed subject with coordinates, tinted by the row's tone, which
+is read from the stylesheet's `:root` block so a badge and its chip cannot drift
+apart. They clear when the board closes and are replaced wholesale on each run.
+
 ## Tooling Snapshot
 
 - `tools/cesium-render.mjs`: headless Cesium render capture via Puppeteer.
