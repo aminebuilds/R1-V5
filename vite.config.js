@@ -18,6 +18,7 @@
  *  13. Weather effects — camera-local Open-Meteo observations without news/geocoding overhead
  *  14. Rocket launches — recent Launch Library 2 mission metadata
  *  15. Radio Browser — public-domain station directory and click counting
+ *  16. Jarvis — personal live console snapshot (/api/jarvis/snapshot)
  *
  * Also exposes Cesium and Google 3D Tiles API keys to the
  * client via `import.meta.env.*` defines.
@@ -71,6 +72,7 @@ import {
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
 import { createAirspaceService } from './src/airspace/airspaceService.js';
+import { createJarvisService } from './src/jarvis/jarvisService.js';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9213,6 +9215,62 @@ function fuelPriceProxy() {
   };
 }
 
+// ── Jarvis — the personal live console (jarvis.html) ─────────────────────────
+//
+// One GET endpoint that returns the whole snapshot: every feed with its
+// measured/modelled/unavailable status, plus the ranked brief. All upstreams
+// are fixed URLs on the allowlist in src/jarvis/sources.js — nothing in the
+// request is forwarded. The snapshot carries the home location, which is why
+// this stays behind the localhost-only default (SECURITY.md, Network exposure).
+
+const JARVIS_CACHE_DIR = path.join(process.cwd(), '.r1-cache', 'jarvis');
+const _jarvisRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 40, globalMax: 120 });
+
+function jarvisStore() {
+  const fileFor = (name) => path.join(JARVIS_CACHE_DIR, `${String(name).replace(/[^a-z0-9._-]/gi, '_')}.json`);
+  return {
+    async read(name) {
+      try { return JSON.parse(await fsp.readFile(fileFor(name), 'utf8')); } catch { return null; }
+    },
+    async write(name, data) {
+      await fsp.mkdir(JARVIS_CACHE_DIR, { recursive: true });
+      await fsp.writeFile(fileFor(name), JSON.stringify(data));
+    },
+  };
+}
+
+function jarvisProxy() {
+  let service = null;
+  const getService = () => {
+    service ||= createJarvisService({ env: process.env, store: jarvisStore() });
+    return service;
+  };
+
+  function install(middlewares) {
+    middlewares.use('/api/jarvis/snapshot', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') { sendJson(405, { error: 'Method Not Allowed' }); return; }
+      if (!_jarvisRateLimiter(clientKey(req))) { sendJson(429, { error: 'Rate limit exceeded' }); return; }
+      try {
+        sendJson(200, await getService().getSnapshot());
+      } catch (error) {
+        console.warn('[jarvis] snapshot failed:', error?.message || error);
+        sendJson(502, { ok: false, error: 'Jarvis snapshot unavailable' });
+      }
+    });
+  }
+
+  return {
+    name: 'jarvis-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function parseJsonEnv(key, fallback) {
   const value = process.env[key];
   if (!value) return fallback;
@@ -9309,6 +9367,7 @@ export default defineConfig(({ mode }) => {
       gdeltTimelineProxy(),
       disruptionHistoryProxy(),
       airspaceProxy(),
+      jarvisProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',
@@ -9327,6 +9386,13 @@ export default defineConfig(({ mode }) => {
       // The Cesium engine bundle is inherently large; raise the warning ceiling
       // so the build log isn't dominated by an expected chunk-size notice.
       chunkSizeWarningLimit: 1500,
+      // Two entry pages: the globe console and the Jarvis personal console.
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          jarvis: path.resolve(__dirname, 'jarvis.html'),
+        },
+      },
     },
   };
 });

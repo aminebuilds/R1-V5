@@ -53,6 +53,52 @@ prices on the map. The supported US paths are the EIA regional anchor above
 | **USGS ComCat FDSN event query** (`earthquake.usgs.gov/fdsnws/event/1/query`) | Eight days of M2.5+ earthquakes behind the time slider (fetched in the browser, keyless) | U.S. public domain, same as the USGS row above | "Data courtesy of the U.S. Geological Survey" |
 | **GDELT DOC 2.0** — `timelinevol` per oil chokepoint (`/api/gdelt/series`) | The time slider's chokepoint lanes: eight days of news-coverage share for Hormuz, Malacca, Suez and Bab el-Mandeb, using the same queries as the disruption index | Same GDELT terms as above: commercial use permitted with citation | "GDELT Project" |
 
+### Jarvis personal console (`jarvis.html`, `/api/jarvis/snapshot`)
+
+Fetched server-side by `src/jarvis/jarvisService.js` from the fixed allowlist in
+`src/jarvis/sources.js`. Every panel labels its figures measured, modelled, or
+unavailable (with the reason); nothing is filled in. This console is for the
+operator's own, personal use — several sources below (Yahoo Finance, Google
+News RSS, Google Trends) are personal/non-commercial only, so it must not be
+put in front of paying customers as-is.
+
+| Source | Used for | License / terms | Attribution |
+|--------|----------|-----------------|-------------|
+| **US Census Geocoder** | One-time geocode of `JARVIS_HOME_ADDRESS` (cached in `.r1-cache/jarvis/home.json`) | US Government work, public domain | "U.S. Census Bureau Geocoder" |
+| **National Weather Service API** (`api.weather.gov`) | Active alerts for the home point, latest station observation (measured), hourly and 12-hour forecast (modelled) | US Government work, public domain; NWS asks for an identifying User-Agent (sent) | "National Weather Service" |
+| **Open-Meteo Air Quality** (CAMS) | Current and 24 h peak US AQI — labelled **modelled** | CC BY 4.0, linked attribution required | "Weather data by Open-Meteo.com" (linked in the footer) |
+| **EPA AirNow** (optional, `AIRNOW_API_KEY`) | Monitor-measured AQI, replaces the modelled value when set | AirNow data-use guidelines; preliminary data | "U.S. EPA AirNow" |
+| **NOAA SWPC** | Space-weather R/S/G scales and planetary Kp | US Government work, public domain | "NOAA Space Weather Prediction Center" |
+| **NOAA National Hurricane Center** | Active tropical cyclones with distance from home | US Government work, public domain | "NOAA NHC" |
+| **USGS M2.5+ week feed** | Earthquakes within 500 km of home and global M6+ | U.S. public domain | "Data courtesy of the U.S. Geological Survey" |
+| **OpenFEMA** | Disaster declarations for the home state/county | US Government work; OpenFEMA terms | "FEMA (OpenFEMA)" |
+| **FAA NAS Status** | Ground stops/delays/closures at EWR, LGA, JFK, TEB | US Government work, public domain | "FAA NAS Status" |
+| **TomTom Traffic Incident Details** (`TOMTOM_API_KEY`) | Incidents within ~8 km of home, 5-min cache | TomTom developer terms, your key and quota | "Traffic © TomTom" |
+| **Ticketmaster Discovery** (optional, `TICKETMASTER_API_KEY`) | Ticketed events within 12 miles, next 48 h | Ticketmaster Discovery API terms | "Ticketmaster" |
+| **Yahoo Finance chart/spark endpoints** | Market board (delayed) and SPY daily closes for the trend regime | Unofficial, undocumented endpoints; Yahoo terms — **personal use only** | "Yahoo Finance" |
+| **U.S. Treasury** daily par yield curve | Curve and day-over-day change | US Government work, public domain | "U.S. Department of the Treasury" |
+| **Federal Reserve Bank of New York** | SOFR and EFFR | NY Fed terms of use; attribution requested | "Federal Reserve Bank of New York" |
+| **Bureau of Labor Statistics API v1** | Unemployment, CPI and core CPI y/y, payroll change (≤25 calls/day; cached 12 h on disk) | US Government work, public domain | "U.S. Bureau of Labor Statistics" |
+| **Freddie Mac PMMS** | Weekly 30- and 15-year mortgage rates | Freddie Mac terms of use; attribution required | "Freddie Mac Primary Mortgage Market Survey®" |
+| **Alternative.me** | Crypto Fear & Greed Index | Free API; attribution required | "Alternative.me" (linked in the footer) |
+| **DefiLlama** stablecoins API | USD-pegged stablecoin supply and 1/7/30-day drift | Open API, attribution requested | "DefiLlama" |
+| **Polymarket Gamma API** | Top non-sports prediction markets by 24 h volume, last prices | Polymarket terms; public read API | "Polymarket" |
+| **Google Trends daily RSS** | US and home-state trending searches | Google terms — personal use | "Google Trends" |
+| **Wikimedia pageviews REST** | Top English-Wikipedia articles for the previous UTC day | CC0 pageview data | "Wikimedia Foundation" |
+| **Hacker News (Algolia API)** | Tech front page; security stories flagged | HN API terms | "Hacker News" |
+| **Google News RSS** | Local, local-incident, macro, AI and tokenization headlines | Personal, non-commercial use only; publishers keep their rights | "Google News RSS" plus each linked publisher |
+| **GDELT DOC 2.0** `timelinetone` | 24 h vs 7-day average article tone per theme (one request per 5 s, refreshed hourly in the background) | Commercial use permitted with citation and link | "GDELT Project" (linked in the footer) |
+| **CISA KEV catalog** | Known-exploited vulnerabilities added in the last 10 days; consumer vendors flagged | US Government work, public domain | "CISA Known Exploited Vulnerabilities Catalog" |
+| **Reddit API** (optional, OAuth app-only) | Hot posts in a few subreddits | Reddit Data API terms; your own app credentials | "Reddit" |
+| **Bluesky / AT Protocol** (optional, app password) | Top posts for a few search terms, last 24 h | Bluesky developer guidelines | "Bluesky" |
+
+**Not wired, deliberately:** CNN's Fear & Greed endpoint rejects non-browser
+clients (HTTP 418) and is not an API, so it isn't spoofed. Reddit and Bluesky
+search now require authentication, so without credentials they report
+`no-key` instead of scraping. Tokenized-treasury AUM has no free
+authoritative feed (rwa.xyz is licensed), so it isn't shown. Utility outage
+maps (PSE&G) publish no public API.
+
 ### Notes on the live sources
 
 - **Google Maps Platform.** You supply your own API key and are bound by [Google's ToS](https://cloud.google.com/maps-platform/terms). Google Maps Content (tiles, geocodes, places) **may not be cached, stored, rehosted, or committed** — this app only ever uses it live, which is the compliant pattern. The "Google" attribution is displayed on the globe and must stay visible. Restrict your key (see [SECURITY.md](SECURITY.md)). As-you-type search suggestions (`/api/google/autocomplete`, `/api/google/place-details`) use Places Autocomplete with a client-minted session token, priced by Google as one bundled session per search interaction rather than per keystroke — the cost-conscious lever for a live-typing UI, alongside client-side debouncing and a 2-character minimum. Like the other Places proxies, neither endpoint keeps a server-side result cache; both set `Cache-Control: private` only, which lets the requesting browser reuse its own response briefly without the server storing or rehosting Google's data across requests.

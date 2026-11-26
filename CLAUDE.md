@@ -79,6 +79,10 @@ must be up for the last one) — all three must stay green, per CONTRIBUTING.md.
   `src/ontology/` — industry lenses and the intent engine.
   `src/voice/` — Realtime voice tool declarations + client execution.
   `src/styles/` — GLSL post-process visual styles.
+  `src/jarvis/` — the operator's personal live console (`jarvis.html`,
+  `/api/jarvis/snapshot`): pure feed parsers, a cached service, and
+  deterministic brief rules. Same measured/modelled/unavailable rule; its home
+  address lives only in `.env`.
 - **Voice is never load-bearing.** Every capability must be reachable from a
   button or a URL parameter first; the voice tool is a second front door to the
   same function. If the mic is off, the product still works.

@@ -7,6 +7,29 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ### Added
 
+- **Jarvis — a personal live console at `/jarvis.html`.** One page that is
+  the source of truth for what is happening right now around a home point and
+  in the markets, built only from live feeds:
+  - **Brief:** deterministic rules turn the feeds into ranked act / watch /
+    info items, each citing the figure, its source, and whether it is measured
+    or modelled. NWS alerts carry the official instruction text. Market items
+    describe risk conditions (volatility regime, trend, big moves, early
+    closes) and never tell you to buy or sell.
+  - **Local:** NWS alerts, station observation and forecast, air quality,
+    earthquakes, tropical storms, space weather, FEMA declarations, FAA status
+    for EWR/LGA/JFK/TEB, TomTom incidents, local and incident headlines.
+  - **Markets & macro:** a delayed market board with your watchlist, SPY trend
+    regime, Treasury curve, SOFR/EFFR, mortgage rates, BLS jobs and inflation,
+    and the NYSE holiday/early-close calendar.
+  - **Narratives & sentiment:** Polymarket odds, crypto Fear & Greed,
+    stablecoin supply, GDELT news tone, Google Trends, Wikipedia attention,
+    Hacker News, CISA KEV, and optional Reddit/Bluesky.
+  - A provenance table lists every feed's state; missing keys read `no-key`,
+    failures read their reason, and last-good data is shown flagged stale.
+    Optional desktop notifications fire on new act-level items.
+
+  Configure with `JARVIS_HOME_ADDRESS` (see `.env.example`).
+
 - **Time slider: the last seven days, not just now.** Open it from the clock
   button in the top action bar, from `?time`, or parked at a moment with
   `?at=-36h` (also `-2d`, an ISO time, or epoch ms). Drag the cursor, step an
