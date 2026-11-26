@@ -2939,6 +2939,108 @@ digital receipt. Creative is composed per surface rather than rescaled.
 > to OpenAI. That route and its two env vars are gone; see
 > [SECURITY.md](../SECURITY.md).
 
+## Jarvis personal console (`src/jarvis/`, November 2026)
+
+A live console for one person around one home point: what is happening
+there right now, and what to do about it. It has two front doors over the
+same server snapshot. `/jarvis.html` is the full brief. `/?jarvis` draws it on
+the globe. Every feed carries the same measured / modelled / unavailable
+envelope as the rest of the app, and nothing is filled in.
+
+### Configuration
+
+The home lives only in the gitignored `.env`. Use `JARVIS_HOME_ADDRESS`,
+geocoded once by the Census geocoder and cached in `.r1-cache/jarvis/home.json`,
+or `JARVIS_HOME_LAT` / `JARVIS_HOME_LON`. The optional settings are
+`JARVIS_HOME_LABEL`, `JARVIS_HOME_STATE`, `JARVIS_HOME_COUNTY`,
+`JARVIS_LOCAL_PLACES` (towns for the local-news queries), `JARVIS_WATCHLIST`
+(`SYM:Label,...`) and `JARVIS_BUOY` (NDBC station, default `44065`).
+`TOMTOM_API_KEY`, `TICKETMASTER_API_KEY`, `REDDIT_CLIENT_ID` /
+`REDDIT_CLIENT_SECRET`, `BSKY_HANDLE` / `BSKY_APP_PASSWORD` and `AIRNOW_API_KEY`
+each enable one feed. Without one, that feed reports `no-key`.
+
+### Server (`jarvisService.js`, `jarvisProxy()` in `vite.config.js`)
+
+| Route | Serves |
+|---|---|
+| `GET /api/jarvis/snapshot` | The 41 feed envelopes, the ranked brief, and the known gaps. Responds within 9 s; slower feeds come back as their last-good copy marked stale. |
+| `GET /api/jarvis/radar.png?t=` | NOAA MRMS radar over the server's own box, only for the 10–14 digit timestamp the snapshot advertised. |
+| `GET /api/jarvis/floodzones.png?t=` | FEMA NFHL flood zones near home, only for the 4–6 digit day stamp the snapshot advertised. |
+
+All three share a 40/min per-client limiter. Each feed has its own TTL and
+stale age, and some persist to `.r1-cache/jarvis/`. Background feeds
+(`safety.places`, `tone.gdelt`) refresh without blocking the snapshot and back
+off on failure. Upstream URLs are fixed builders in `sources.js` on a host
+allowlist, re-checked after redirects, with timeouts and byte caps. Parsers in
+`feeds.js` are pure.
+
+Feed groups:
+- **Weather:** NWS alerts with zone outlines, observations, forecast, MRMS radar.
+- **Water:** NWPS river and tidal gauges with flood category; NDBC buoy sea state; FEMA NFHL zones, labelled modelled.
+- **Safety:** OSM hospitals, police, fire stations and mapped shelters. Overpass across three hosts, then a Nominatim fallback at ≤1 request/s. Also any FEMA shelter that is open, OSRM routes to the nearest emergency hospitals, and Open-Meteo elevations.
+- **Airspace and hazards:** FAA TFRs (NJ/NY), USGS, NHC, SWPC, OpenFEMA, FAA airport status.
+- **Local:** TomTom incidents, Ticketmaster events, AirNow / Open-Meteo air quality, and local and safety news.
+- **Markets and macro:** Yahoo quotes and SPY trend regime, Treasury curve, NY Fed rates, BLS, Freddie Mac PMMS.
+- **Sentiment and narratives:** crypto Fear & Greed, DefiLlama stablecoins, Polymarket, Google Trends, Wikimedia, Hacker News, GDELT tone, Reddit, Bluesky.
+- **Reports:** macro, AI, tokenization and title-filtered UAP/drone, payments and power-outage headlines.
+- **Cyber:** CISA KEV.
+
+### Brief (`recommend.js`)
+
+Deterministic rules turn feeds into `act` / `watch` / `info` / `setup` items.
+Each item cites its figure and source. Market items describe risk conditions,
+never trades. For water, a nearby non-tidal gauge at moderate flood or worse,
+or any gauge at major, is `act`; coastal flooding is `watch`. Either kind
+carries the pre-planned route, both elevations, and the warning that the route
+does not know which roads are flooded. Flood, wind, power, finsec, cyber,
+quake, cold, heat and air items carry a `PLAYBOOKS` procedure. It is shown as
+guidance, not data. NYSE holidays and early closes for 2026–2027 live in
+`marketCalendar.js`.
+
+### Globe map mode (`globeMode.js`, pure logic in `mapModel.js`)
+
+`?jarvis[=home|area|metro]` (900 m / 8 km / 75 km) or the `my_location` button
+opens it. The side panels step aside for a light card. The card shows status,
+the top three items each with a "Do now" step, readouts, the escape route link,
+view and layer chips, and a live countdown.
+
+The globe layers are:
+- radar and flood zones, each a ground-classified image rectangle, because
+  tileset imagery draping does not render on Google 3D tiles;
+- NWS alert polygons, traffic incident paths, airports by FAA status;
+- gauges by flood state, safe places, the route, and nearby quakes;
+- the app's own flights, military, earthquake and FIRMS layers.
+
+The app's traffic-flow dots are not used, because their positions are
+illustrative.
+
+### Protection mode
+
+The front doors are `?protect`, the card's Protect button, and
+`set_protection_mode` (voice and typed chat; `runProtectionMode` in
+`src/voice/r1Actions.js`). It flies home, turns every Jarvis layer and the four
+app layers on, and refreshes every 30 s instead of 60 s. It returns a spoken
+summary. Closing it restores only the app layers it turned on. New `act` items
+are announced through the voice session's `announceEvent`, and through a
+desktop notification only when the browser already allows one. The safety
+feeds must load once before anything counts as new, so a server restart does
+not re-announce standing alerts.
+
+### Known gaps and privacy
+
+The snapshot's `gaps` lists what was asked for but has no truthful live source.
+Each is shown in the UI with its reason:
+- foot traffic;
+- utility outage maps;
+- UFO/UAP sightings;
+- live crime;
+- private or hidden bunkers.
+
+Third parties never see the exact home point. They get it rounded to 2
+decimals, or 3 for Overpass, Nominatim and elevation. OSRM routes start from
+the point rounded to ~100 m. See [SECURITY.md](../SECURITY.md); do not expose
+these routes beyond localhost.
+
 ## Tooling Snapshot
 
 - `tools/cesium-render.mjs`: headless Cesium render capture via Puppeteer.
