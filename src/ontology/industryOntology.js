@@ -86,7 +86,13 @@ export const VERTICALS = Object.freeze({
     sectorName: 'Retail & Consumer',
     color: '#36dcff',
     icon: 'local_gas_station',
-    aliases: ['gas station', 'convenience store', 'c-store', 'petrol', 'forecourt', 'fueling', 'truck stop', 'travel plaza', 'wawa', "casey's", "buc-ee's", 'circle k', '7-eleven', 'loves', 'pilot flying j'],
+    // The integrated majors (chevron, shell, exxon, bp, mobil) appear here AND
+    // under energy-utilities on purpose. They really are both a refiner and a
+    // forecourt brand, and which one the operator means changes every layer on
+    // screen. `verticalsMatchingBrand` detects that overlap so the console asks
+    // instead of guessing — a silent pick would configure the wrong console for
+    // half the people who say the word.
+    aliases: ['gas station', 'convenience store', 'c-store', 'petrol', 'forecourt', 'fueling', 'truck stop', 'travel plaza', 'wawa', "casey's", "buc-ee's", 'circle k', '7-eleven', 'loves', 'pilot flying j', 'chevron', 'shell', 'exxon', 'exxonmobil', 'bp', 'mobil', 'texaco', 'sunoco', 'marathon', 'speedway', 'quiktrip', 'racetrac', 'sheetz', 'kwik trip', 'maverik'],
     glossary: {
       'Forecourt': 'The open area outside a service station where fuel dispensers and vehicle charging bays are located.',
       'C-Store (Convenience Store)': 'Small-format retail store offering packaged goods, foodservice, and essential merchandise.',

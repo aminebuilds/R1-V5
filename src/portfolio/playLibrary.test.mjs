@@ -151,3 +151,23 @@ test('selectPlays returns nothing when no threshold is met', () => {
   assert.deepEqual(selectPlays({ delayMin: 1, categoryText: 'fuel' }), []);
   assert.deepEqual(selectPlays({}), []);
 });
+
+test('the competitor-traffic-advantage play needs both a real gap and a nearby competitor', () => {
+  const play = getPlay('play:competitor-traffic-advantage');
+  assert.equal(playFires(play, { categoryText: 'fuel' }), false, 'no signal at all must not fire');
+  assert.equal(playFires(play, {
+    competitorTrafficDeltaPct: 8,
+    competitorDistanceM: 500,
+    categoryText: 'fuel',
+  }), false, 'below the delta threshold must not fire');
+  assert.equal(playFires(play, {
+    competitorTrafficDeltaPct: 25,
+    competitorDistanceM: 5000,
+    categoryText: 'fuel',
+  }), false, 'beyond the distance cap must not fire');
+  assert.equal(playFires(play, {
+    competitorTrafficDeltaPct: 25,
+    competitorDistanceM: 800,
+    categoryText: 'fuel',
+  }), true);
+});

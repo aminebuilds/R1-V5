@@ -79,6 +79,22 @@ export const PLAYS = Object.freeze([
     categories: ['fuel'],
   }),
   Object.freeze({
+    id: 'play:competitor-traffic-advantage',
+    name: 'Intercept traffic favoring a nearby competitor',
+    action: 'Push a loyalty-app offer to members near the corridor feeding the competitor, timed to the live gap',
+    rationale: 'Live road congestion on the corridor serving a nearby competitor is measurably higher than on this site\'s own corridor right now — a passing-traffic signal, not a footfall count — worth testing whether a promo redirects some of it.',
+    trigger: { minCompetitorTrafficDeltaPct: 20, maxCompetitorDistanceM: 2000 },
+    expectedLiftPct: { value: null, confidence: 'unmeasured', n: 0 },
+    requiresApproval: true,
+    // No category gate: `matchesCategory` needs the category word literally
+    // in the site's name/format text, and Google-Places-sourced sites (most
+    // of the portfolio) carry `format: null` — a real "7-Eleven" would never
+    // match 'convenience'. A traffic-advantage signal is meaningful for any
+    // storefront with nearby competitors, so it is deliberately unfiltered
+    // rather than gated on a heuristic this data can't reliably satisfy.
+    categories: [],
+  }),
+  Object.freeze({
     id: 'play:supply-risk-forward-buy',
     name: 'Bring forward the next fuel buy',
     action: 'Advance the scheduled wholesale purchase ahead of the modelled band widening',
@@ -125,7 +141,8 @@ export function matchesCategory(categoryText, categories) {
  * @param {object} signals Measured values: `delayMin`, `distanceToBottleneckM`,
  *   `approach`, `conversionScore`, `isConstruction`, `forecastDeclineCents`,
  *   `centsAboveLocalMin`, `competitorsWithin1km`, `priceRankFromCheapest`,
- *   `disruptionIndex`, `categoryText`.
+ *   `disruptionIndex`, `competitorTrafficDeltaPct`, `competitorDistanceM`,
+ *   `categoryText`.
  * @returns {boolean}
  */
 export function playFires(play, signals = {}) {
@@ -168,6 +185,14 @@ export function playFires(play, signals = {}) {
   if (Number.isFinite(t.minDisruptionIndex)) {
     const i = num(signals.disruptionIndex);
     if (i === null || i < t.minDisruptionIndex) return false;
+  }
+  if (Number.isFinite(t.minCompetitorTrafficDeltaPct)) {
+    const d = num(signals.competitorTrafficDeltaPct);
+    if (d === null || d < t.minCompetitorTrafficDeltaPct) return false;
+  }
+  if (Number.isFinite(t.maxCompetitorDistanceM)) {
+    const d = num(signals.competitorDistanceM);
+    if (d === null || d > t.maxCompetitorDistanceM) return false;
   }
   return true;
 }

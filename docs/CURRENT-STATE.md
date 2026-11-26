@@ -2248,7 +2248,9 @@ silently demoting every later lookup for the session.
 ### Not Currently in Runtime
 
 - Weather radar (removed before OSS v1 after QA; no reliable visible payoff)
-- General replay/timeline systems outside the Space Missions experience
+- General replay of moving objects (aircraft, vessels, satellites). The time
+  slider (below) shifts only layers with a stored, measured past: fires and
+  earthquakes.
 - LiDAR explorer and paired-point CCTV calibration experiments
 
 ## Auth + Launch
@@ -2594,7 +2596,24 @@ tell" and "nothing found" are different answers and the board keeps them apart.
 ### Block vocabulary
 
 `head` · `verdict` · `readouts` · `evidence` · `chain` · `ranked` ·
-`multiples` · `band` · `plays` · `coverage` · `sources` · `gap` · `note`.
+`multiples` · `band` · `plays` · `coverage` · `sources` · `gap` · `note` ·
+`series` · `roster` · `campaigns` · `creative` · `surfaces` · `timeline` ·
+`headlines` · `dossier`.
+
+The last three belong to the US airspace brief (below). `sources` items may
+carry an http(s) `url`. Every block link is filtered through `safeLink()`, so a
+`javascript:` or relative URL from a feed is dropped, never rendered.
+
+The last five belong to the store agent. `series` is ordered time — days of a
+week, hours of a shift — drawn with the prior period as a ghost outline behind
+each bar and an incomplete period hatched rather than short, because a
+half-finished day must not read as a bad one. `roster` carries people and
+cohorts. `campaigns` is the only block that deliberately shows two
+provenances in one row, in two labelled columns that never merge. `creative`
+is the advertisement itself and carries no provenance chip — there is nothing
+to be right or wrong about in a piece of artwork, and the numbers justifying
+it live in the blocks around it. `surfaces` is distribution state, including
+which pushes cannot be recalled.
 
 `evidence` is the narration contract from
 [RETAIL-FUEL-INTELLIGENCE.md](RETAIL-FUEL-INTELLIGENCE.md) §05.3 made visible:
@@ -2607,11 +2626,23 @@ its approval requirement.
 ### Composed questions
 
 `get_cool_off_opportunities`, `get_view_health`, `get_portfolio_health`,
-`get_fuel_price_outlook`, `analyze_competitors`,
-`get_traffic_delays_and_construction`, `analyst_query`. Any other action falls
-back to `composeGeneric`, which still produces a header, a verdict and a source
-row. Only the composed set opens the board — a camera move is not an
-explanation.
+`get_fuel_price_outlook`, `inspect_chokepoint`, `analyze_competitors`,
+`get_traffic_delays_and_construction`, `analyst_query`, `get_local_news`,
+`get_full_insight`, `get_airspace_brief`. Any other action falls back to `composeGeneric`, which
+still produces a header, a verdict and a source row. Only the composed set
+opens the board — a camera move is not an explanation.
+
+`inspect_chokepoint` (fly to a chokepoint gate, count tankers once the AIS feed
+actually covers it) and `get_fuel_price_outlook` now share one disruption
+assessment (`assessGateDisruption()` in `r1Actions.js`, over
+`disruptionIndex.js`'s `computeDisruptionIndex()`), so a chokepoint visit shows
+its own tanker/vessel counts *and* the same supply-risk index the priced
+forecast's upper band widens on — a `chain` block narrates tankers-in-gate →
+transit history → disruption index, `pending` rather than a fabricated value
+wherever a stage lacks data. Reachable by voice, by asking the board a question
+naming a strait or chokepoint by name (`askRouter.js`), or by asking about fuel
+price while naming a chokepoint (routes `get_fuel_price_outlook` with that gate
+instead of the Hormuz default).
 
 ### Front doors
 
@@ -2639,6 +2670,274 @@ The same rows also place lettered badges on the globe (the `explain-keys` data
 source): one per keyed subject with coordinates, tinted by the row's tone, which
 is read from the stylesheet's `:root` block so a badge and its chip cannot drift
 apart. They clear when the board closes and are replaced wholesale on each run.
+
+### US airspace brief (November 2026)
+
+`get_airspace_brief` answers "what is happening in US airspace?" from four
+server-side feeds plus a curated event record. It is national, not
+camera-scoped. It was built after the FAA's nationwide departure ground stop
+of 2026-11-13.
+
+**Front doors.** There are three, none privileged:
+
+- The board's `BRIEFS · US AIRSPACE` button under the ask box.
+- `?airspace` (or `?brief=airspace`) on load.
+- The ask box. `askRouter` sends FAA / ground stop / grounded / airspace /
+  "flights cancelled" questions here, ahead of road traffic. "How many
+  flights in view" still goes to the analyst counter.
+
+There is no voice tool yet: adding one means re-deriving the two schema pins.
+
+**Server** (`/api/airspace/brief`, `src/airspace/airspaceService.js`, wired in
+`vite.config.js` → `airspaceProxy`):
+
+- **FAA NAS Status.** The public ATCSCC XML, parsed by
+  `src/airspace/nasStatus.js` into ground stops, ground delay programs,
+  arrival/departure delays and closures. Closures carry their NOTAM window;
+  standing GA prior-permission notices are counted but not listed. The feed is
+  cached 60 s. A failed read keeps the last parse marked `stale`; with no parse
+  it is `unavailable` and the board shows a gap.
+- **Timeline sampler.** It writes a sample every 10 min to
+  `.r1-cache/airspace-timeline.json` (seven days max). Each sample holds the US
+  airborne count by region (lower 48 / Alaska / Hawaii) and operator class from
+  OpenSky `states/all`, plus the FAA program counts at that moment.
+  - It reuses the flights proxy's snapshot when that is under 3 min old.
+  - Otherwise it fetches its own, every `R1_AIRSPACE_SAMPLE_MIN` minutes. It
+    never fetches during a 429 cooldown and never because a board is open.
+  - The same upstream snapshot is never recorded twice.
+- **Departure study.** For the active event it reads OpenSky `flights/all` over
+  the event day and the day before, in two-hour windows, counting confident US
+  takeoffs per 30 min (`usTraffic.js`).
+  - It is built in the background (the brief says `computing` until then) and
+    cached per window. A window that ended over 24 h ago is final and never
+    re-fetched.
+  - The table is a sample that only lists landed flights. The board shows it as
+    a line against the prior-day ghost, never as a total.
+- **Headlines.** GDELT, then Google News RSS (flagged non-commercial). They are
+  stale-while-revalidate: the brief waits at most 4 s for them, then shows what
+  it has.
+
+**Event record** (`src/airspace/events.js`). This holds the reported moments
+(lettered markers) and facts of an event: cause, what was ruled out, impact,
+recovery, next steps. Each item carries the outlets that reported it and the
+time the record was last checked. Disagreements between outlets sit in a note.
+Facts R.1 measured itself are labelled `measured by R.1`. An event stays the
+board's subject for seven days after its window.
+
+**Board.** In order:
+
+1. The verdict (fixed wording over counts).
+2. Readouts: ground stops, delay programs, airport delays, airborne over US,
+   climbing out. A traffic sample older than 30 min shows as a dash, and the
+   verdict dates it.
+3. The `timeline` block.
+4. FAA programs in effect.
+5. The event record (`dossier`).
+6. Linked coverage (`headlines`).
+7. Sources with links.
+
+**The `timeline` block** (`src/explain/airspaceRender.js`) stacks lanes over
+one time domain:
+
+- **Departures.** A step line against the prior-day ghost.
+- **Airborne over US.** Samples; gaps over an hour are breaks, not slopes.
+- **Shading and markers.** The ground-stop band is shaded alert-sunk. Lettered
+  marker keys jump the cursor; crowded keys drop to a second row.
+- **Scrubbing.** Drag across a lane, or use the range input. The readout prints
+  the half-hour's departures against the day before, the nearest sample, and
+  the FAA programs recorded with it.
+
+**Live.** While the board stays open on this answer it re-fetches every 60 s
+(`src/airspace/airspaceLive.js`). It updates through `refreshExplainResult()`,
+which swaps the block list in one event instead of starting a run, so the board
+never blanks. Unchanged blocks keep their DOM and the scroll position holds.
+Changed blocks snap rather than fade (`data-settled`). A cursor parked at the
+right edge follows "now"; a moved cursor stays put. Refresh stops when the board
+closes or answers something else, and pauses in a background tab.
+
+## Time Slider (`src/timeline/`)
+
+A transport strip above the command dock that moves the map back up to seven
+days, in one-hour steps. Built November 2026 so the map could show a trend
+rather than one snapshot.
+
+**Front doors.** The clock button in `#top-center-actions`; `?time` opens it
+live; `?at=` opens it parked (`-36h`, `-2d`, `-90m`, an ISO instant, or epoch
+ms — anything else opens live rather than at a guessed time). `window.__r1.time`
+exposes `open/close/setCursor/goLive/getState`. No voice tool yet: adding one
+means re-deriving the two schema pins.
+
+### What moves and what does not
+
+| Layer | At the cursor | Source |
+|---|---|---|
+| `local-firms` | The 24 h of detections ending at the cursor | `/api/firms/history` (nine-day server store) |
+| `earthquakes` | The 24 h of M2.5+ events ending at the cursor | USGS FDSN event query, eight days, fetched in the browser |
+| Everything else | Unchanged — live | — |
+
+The window is the width each layer uses live, so the cursor at "now" is exactly
+the live map. While the cursor is parked, the strip's footer lists every other
+enabled layer as `STILL LIVE, NOT TIME-SHIFTED`, the FIRES row in the layer
+panel reads `HISTORY · 24 H TO <time>`, and the clock button takes a caution
+edge. Closing the strip returns both layers to live, so a past picture is never
+on screen without the strip. In clean view only the strip's readout stays, and
+only while parked.
+
+### Module map
+
+| Module | Role |
+|---|---|
+| `timeCursor.js` | The single cursor: live or parked, domain `[now − 7 d, now]`, hour steps, `?at=` parsing, UTC formatters. Pure. |
+| `firmsHistory.js` | Shared by server and client. Day planning (`DAY_RANGE` ≤ 5, forward from `DATE`), the per-day store with injected IO, the binary transfer format, windowing and hourly binning. Pure. |
+| `gdeltSeries.js` | GDELT `timelinevol` parsing with dates kept; `pointAt` treats a gap over 3 h as a gap, not a carry-forward. Pure. |
+| `historySources.js` | One lazy source per history (FIRMS, USGS, GDELT): load, coverage, window cut, exact in-view counts, rolling trend series. |
+| `timeStrip.js` | DOM, transport controls, lanes, scrubbing, and pushing windows into the layers. |
+
+Layers opt in with `showHistorical…(records, {endMs, spanMs})`, `showLive()` and
+`isHistorical()`. Both keep their live set current underneath a historical
+window: the 10-minute FIRMS poll and the 60-second USGS poll update the live set
+but do not repaint over the past. `firmsHeatmap.js`'s swap goes through
+`applyFireSet()`, shared with the live refresh, so selection eviction and the
+settle-before-rebuild order are the same on both paths. A forced render of an
+empty set now clears the previous sprites, so an empty hour does not leave the
+last picture behind.
+
+**Known limit.** `analyst_query` and "take me to the biggest fire" read
+whatever the layer holds, which while parked is the historical window. The
+answer is about the moment on screen, but the narration does not yet say it is
+historical.
+
+### FIRMS history store
+
+- **Nine UTC days.** That is today plus the eight before it, enough for a
+  24 h window at the far end of a seven-day slider. One file per day lives in
+  `.r1-cache/firms-history/`.
+- **Backfill.** The first `/api/firms/history` request backfills the store:
+  two requests per VIIRS source, sequential, quota-courteous.
+- **When it stops fetching.** A day is final once fetched 6 h after it ended,
+  and is then never fetched again. Open days are re-fetched at most every
+  30 min, and each live refresh's two-day pull also tops them up.
+- **Failures.** A failed chunk is recorded per day and per source. Earlier
+  rows for that day survive.
+- **Coverage.** `GET /api/firms/history` returns per-day coverage, hourly global
+  counts and a `status`:
+  - `building`: a day is still missing.
+  - `ready`: with `refreshing` while open days top up.
+  - `unavailable`
+  - `no-key`
+- **Data.** `GET /api/firms/history/data` returns the detections packed binary,
+  sorted by acquisition time: 20 bytes per detection, ~14 MB for ~700k. The
+  browser downloads it only when the strip opens.
+- **Registration.** The plugin registers under both `configureServer` and
+  `configurePreviewServer`. Before this change FIRMS was dev-only.
+
+### Lanes
+
+- **Fires.** Rolling 24 h detections per hour, drawn as bars in the fires hue.
+  Counts are in view when the camera shows a region, global at hemisphere
+  scale, and the lane says which.
+- **Quakes.** Each event is a tick at its time, coloured by the §09 magnitude
+  ramp.
+- **Chokepoints.** One row each for Hormuz, Malacca, Suez and Bab el-Mandeb:
+  GDELT volume intensity, the share of monitored news coverage, over eight
+  days. It is not an incident count. Clicking a row's label flies the camera to
+  that chokepoint.
+- **Gaps.** A stretch where a source has no data is hatched.
+- **Values.** The value column prints the exact count the map draws for the
+  cursor window, not the binned lane value. A window with no data reads
+  `NO DATA`, a partly covered one `· PARTIAL`, and a feed that could not answer
+  `UNAVAILABLE`.
+- **GDELT rate limits.** GDELT rate-limits aggressively (one request per 5 s
+  per client, shared with every other GDELT call on this server).
+  `/api/gdelt/series` answers a failed or timeline-less response with
+  `status: 'unavailable'` and caches nothing, so a 429 is never shown as zero
+  coverage.
+
+## Store Agent (`src/storeAgent/`)
+
+One store's own operating surface: what it traded, who is on the loyalty
+file, what campaigns are running, and what to put on its screens.
+
+### What the data is
+
+**There is no live POS connection.** Every figure is generated in-process by
+a deterministic simulation of the transaction, loyalty and content stack a
+PAR-class deployment exposes. It is the demonstration substrate for the
+commercial motion, not a placeholder on a measured path. It must not serve a
+paying operator's console, and its output must not be blended into a rollup
+that also carries measured feeds — see the rule at the top of
+[CLAUDE.md](../CLAUDE.md). `src/storeAgent/storeLedger.js`'s header is the
+authoritative statement of this and should be read before changing anything
+here. If a real operator stack lands, the seam is the exports of
+`storeAgent.js`: same shapes, same field names, different source.
+
+Determinism is the design. Every figure derives from `hash(siteId + date)`
+through a seeded PRNG, so asking the same question twice about the same store
+on the same day returns the same answer, and a period-over-period delta is a
+real subtraction over a generated series rather than an invented percentage.
+
+### Shape
+
+| Module | Role |
+|---|---|
+| `storeLedger.js` | POS: the trading day and period, daypart and category structure, weather response, and proration of an incomplete day. |
+| `storePulse.js` | The live hour against what that hour normally does, plus ranked attribution of any variance. |
+| `memberGraph.js` | Loyalty file, behavioural segments, enriched member profiles, and the probabilistic identity bridge. |
+| `offerStudio.js` | Offer catalogue, condition triggers, ranking, promotion economics, forecast, per-surface creative, and deployment. |
+| `campaignBook.js` | Running campaigns, each with its measured result beside the modelled forecast it launched on. |
+| `offerRegistry.js` | localStorage-backed working set, so "push it live" can find the offer built two sentences earlier. |
+| `storeAgent.js` | Store resolution and one entry point per operator question, each returning the spoken readout. |
+
+### Store resolution
+
+An explicitly named store, then the nearest portfolio site to the camera,
+then a store anchored on the camera itself. The last fallback is deliberate:
+an operator who has not imported a portfolio should still be able to ask
+about the store they are looking at.
+
+### The rules the engines enforce
+
+- **Proration.** Today is incomplete, and so is the day it is compared
+  against. Both ends of the last comparison are cut to the same point in the
+  trading day, and dayparts are cut individually — at 14:40 the AM rush is
+  complete and the evening has not started.
+- **Attribution, never assertion.** A variance is always reported with a
+  ranked cause list built from the console's own live context. Shares are
+  apportioned only across causes the console can actually see, capped at
+  `MAX_EXPLAINED` (0.85), and the residual is returned as unexplained. A
+  cause list that sums to 100% is a cause list that is guessing.
+- **Promotion economics.** Margin is earned on volume the offer *created*,
+  and the discount is still paid on volume that was coming anyway.
+  Cents-per-gallon mechanics are costed per gallon, not per redemption. A
+  forecast is capped at what the store can physically turn.
+- **Pace is prorated, and profit overrides it.** A campaign three days into
+  fourteen is judged against the forecast cut to three days. A campaign
+  beating its redemption plan while losing money is not "outperforming" —
+  the verdict is overridden and the book is sorted by net gross profit.
+- **Identity is probabilistic.** Confidence compounds across independent
+  signals rather than summing; a match below the auto-merge bar is a review
+  candidate and nothing is written to the member record.
+- **Segments are behavioural.** Frequency, attachment, daypart, recency,
+  category concentration. No segment is built on an inferred personal
+  attribute, and a test guards against one being added.
+
+### Voice and typed surface
+
+Seven tools — `get_store_performance`, `get_store_pulse`,
+`get_member_intelligence`, `get_campaign_performance`, `recommend_offer`,
+`create_offer`, `deploy_offer` — all reachable by typing as well as by voice.
+`create_offer` stages and draws the artwork; `deploy_offer` publishes. They
+are separate on purpose, and a mobile-app deployment sends a push that cannot
+be recalled, which both the board and the narration state plainly.
+
+The six publishable surfaces are the forecourt canopy, dispenser toppers, the
+in-store menu board, the mobile app card, the register prompt, and the
+digital receipt. Creative is composed per surface rather than rescaled.
+
+> **Removed:** the Realtime session previously appended a remote
+> `par_intelligence` MCP tool for this capability, with a bearer token handed
+> to OpenAI. That route and its two env vars are gone; see
+> [SECURITY.md](../SECURITY.md).
 
 ## Tooling Snapshot
 

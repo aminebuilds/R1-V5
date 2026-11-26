@@ -7,6 +7,7 @@
 // that contract; the layer's getStats() is a thin caller.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import trafficLayer, {
   deriveTrafficFlowError,
   trafficFeedPresentation,
@@ -150,4 +151,36 @@ test('the shipped layer boots keyless-honest before any status check', () => {
   assert.equal(stats.error, null);
   assert.ok(!LIVE_CLAIM.test(stats.loadingLabel), `boot label implies live data: ${stats.loadingLabel}`);
   assert.equal(layerFeedState(stats), 'fallback');
+});
+
+// ── docs/KNOWN-ISSUES.md "city jumps": moveEnd safety net ───────────────────
+//
+// A real Cesium viewer/camera is too heavy to fake convincingly here (the
+// existing suite tests the pure status helpers, not the stateful enable()
+// path), so this pins the wiring contract as source text — the same pattern
+// firstRunExperience.test.mjs uses for its ESC-arbitration wiring. What it
+// protects: `changed`'s 5% threshold can stop firing before a flyTo has truly
+// settled, clearing dots without arming a reload; moveEnd is Cesium's own
+// "camera is now at rest" signal, so it must re-run the SAME check as a
+// safety net, and must be cleaned up on disable() like every other listener
+// this layer installs.
+test('camera.moveEnd re-runs the reload check as a safety net, and is torn down on disable', () => {
+  const src = readFileSync(new URL('./traffic.js', import.meta.url), 'utf8');
+
+  const enableBody = src.slice(src.indexOf('enable(viewer) {'), src.indexOf('disable(viewer) {'));
+  assert.match(
+    enableBody,
+    /_moveEndRemover = viewer\.camera\.moveEnd\.addEventListener\(onCameraChanged\);/,
+    'enable() must subscribe moveEnd to the SAME check changed uses, not a bespoke handler',
+  );
+  // Must be installed alongside (not instead of) the existing changed
+  // listener — this is an addition, not a replacement.
+  assert.match(enableBody, /viewer\.camera\.changed\.addEventListener\(onCameraChanged\);/);
+
+  const disableBody = src.slice(src.indexOf('disable(viewer) {'), src.indexOf('async update() {'));
+  assert.match(
+    disableBody,
+    /if \(_moveEndRemover\) \{\s*\n\s*_moveEndRemover\(\);\s*\n\s*_moveEndRemover = null;\s*\n\s*\}/,
+    'disable() must remove the moveEnd listener, or it leaks across layer re-enables',
+  );
 });

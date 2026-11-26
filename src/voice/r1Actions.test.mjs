@@ -3013,6 +3013,36 @@ test('voice runner: analyze_competitors benchmarks brands', async () => {
   assert.match(result.readout, /COMPETITIVE —/);
 });
 
+test('voice runner: analyze_competitors searches where the camera actually is, not a hardcoded Austin default', async () => {
+  const { viewer, styleManager } = createVoiceNavigationHarness();
+  // Denver — nowhere near the app's Austin last-resort default — so a bias
+  // that silently fell back to that default would be caught here.
+  viewer.camera.positionCartographic = Cesium.Cartographic.fromDegrees(-104.9903, 39.7392, 500);
+
+  const seenCoords = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url), 'http://localhost');
+    if (parsed.searchParams.has('lat')) {
+      seenCoords.push({ lat: parsed.searchParams.get('lat'), lon: parsed.searchParams.get('lon') });
+    }
+    return { ok: true, json: async () => ({ places: [], elements: [] }) };
+  };
+
+  try {
+    const runner = createR1ActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });
+    await runner('analyze_competitors', { brandName: 'Starbucks', competitors: ["Dunkin'"] });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.ok(seenCoords.length > 0, 'the search must actually reach the places endpoint');
+  for (const { lat, lon } of seenCoords) {
+    assert.equal(lat, '39.73920', "must bias on the camera's latitude, not the Austin default");
+    assert.equal(lon, '-104.99030', "must bias on the camera's longitude, not the Austin default");
+  }
+});
+
 test('voice runner: get_traffic_delays_and_construction detects bottlenecks', async () => {
   const { viewer, styleManager } = createVoiceNavigationHarness();
   const runner = createR1ActionRunner({ viewer, styleManager, dataManager: { layers: new Map(), getAll: () => [] } });

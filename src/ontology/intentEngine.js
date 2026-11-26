@@ -175,6 +175,32 @@ export function resolveCommercialIntent(query, context = {}) {
 }
 
 /**
+ * Every vertical whose alias list claims this brand name.
+ *
+ * Some brands genuinely belong to more than one: Chevron and Shell are both
+ * refiners and forecourt retailers, and the console an operator needs is
+ * completely different in each case — different layers, different KPIs,
+ * different questions worth asking. `resolveCommercialIntent` has to return a
+ * single winner, so this exists to tell the caller when that winner was picked
+ * out of a tie. The honest move then is to ask the operator, not to configure
+ * a console for the wrong half of their business and let them discover it from
+ * the layers.
+ *
+ * Exact alias matching only — no substring scoring — so this answers "is this
+ * name claimed twice in the catalog", not "what is this text about".
+ *
+ * @param {string} brandName
+ * @returns {Array<{id: string, name: string, sectorName: string}>}
+ */
+export function verticalsMatchingBrand(brandName) {
+  const needle = String(brandName || '').trim().toLowerCase();
+  if (!needle) return [];
+  return getAllVerticals()
+    .filter((vertical) => (vertical.aliases || []).some((alias) => String(alias).toLowerCase() === needle))
+    .map((vertical) => ({ id: vertical.id, name: vertical.name, sectorName: vertical.sectorName }));
+}
+
+/**
  * Format a structured JARVIS-style intelligence brief for a given entity and vertical.
  * @param {string} entityName
  * @param {import('./industryOntology.js').IndustryVertical} vertical

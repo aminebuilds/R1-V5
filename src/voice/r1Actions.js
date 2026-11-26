@@ -20,17 +20,34 @@ import { isPickedWorldPosition } from '../data/scenePick.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
-import { activateNetwork, searchAndAddBusiness } from '../portfolio/sitesPanel.js';
+import { activateNetwork, discoverAndAddNetwork, regeocodePendingSites, searchAndAddBusiness } from '../portfolio/sitesPanel.js';
+import { resolveCommercialIntent, verticalsMatchingBrand } from '../ontology/intentEngine.js';
+import { VERTICAL_OSM_FILTERS } from '../portfolio/networkDiscovery.js';
+import { loadPortfolio } from '../portfolio/portfolioStore.js';
 import { executeJarvisFuzzySearch } from '../portfolio/fuzzySearchEngine.js';
 import { analyzeCompetitivePosition } from '../portfolio/competitiveEngine.js';
+import { renderHeatmapData } from '../portfolio/competitiveHeatmap.js';
+import { estimateBusyness } from '../portfolio/busynessModel.js';
 import { fetchTrafficDelays } from '../portfolio/trafficDelayEngine.js';
 import { evaluateCoolOffOpportunities } from '../portfolio/coolOffOpportunityEngine.js';
 import { getViewHealth, getPortfolioHealth } from '../portfolio/healthRollup.js';
-import { buildRegionalPriceModel, paddForCoords } from '../portfolio/fuelPriceClient.js';
+import { buildRegionalPriceModel, paddForCoords, fetchEiaSeries } from '../portfolio/fuelPriceClient.js';
 import { describeModel } from '../portfolio/fuelPriceModel.js';
-import { CHOKEPOINTS, countTankersInGate } from '../portfolio/disruptionIndex.js';
+import { CHOKEPOINTS, countTankersInGate, computeDisruptionIndex, buildVolatilityHistory } from '../portfolio/disruptionIndex.js';
+import { fetchGdeltTimeline, postDisruptionSnapshot } from '../portfolio/disruptionClient.js';
 import { fetchRegionalBrief, weatherCodeLabel } from '../data/regionalBrief.js';
+import { fetchAirspaceBrief } from '../airspace/airspaceClient.js';
 import sitesLayer from '../data/sitesLayer.js';
+import {
+  campaignPerformance,
+  memberIntelligence,
+  publishOffer,
+  recommendOffers,
+  resolveStore,
+  stageOffer,
+  storePerformance,
+  storePulse,
+} from '../storeAgent/storeAgent.js';
 import { publishActionResult } from '../explain/bus.js';
 
 const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
@@ -340,6 +357,163 @@ export function getActionRunner() {
 /** Test hook: forget the shared runner. */
 export function resetActionRunner() {
   _sharedActionRunner = null;
+}
+
+/**
+ * Turn a gate's live tanker count into the disruption index's `transits`
+ * input: the app's own snapshot history, since AIS has no historical-transit
+ * feed to draw on (see `disruptionClient.postDisruptionSnapshot`).
+ * @param {object} gate One of `CHOKEPOINTS`.
+ * @param {{count: number, unclassified: number}} tankerInfo From `countTankersInGate`.
+ * @param {number} inGateCount Total AIS contacts in the gate, tanker or not.
+ * @returns {Promise<{current: number, history: number[]}|null>}
+ */
+async function computeGateTransitsInput(gate, tankerInfo, inGateCount) {
+  try {
+    const history = await postDisruptionSnapshot(gate.id, {
+      tankerCount: tankerInfo.count,
+      vesselsInGate: inGateCount,
+      unclassified: tankerInfo.unclassified,
+    });
+    const counts = history.map((p) => p.tankerCount).filter(Number.isFinite);
+    if (counts.length >= 2) {
+      return { current: counts[counts.length - 1], history: counts.slice(0, -1) };
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Score a chokepoint's disruption index from whatever inputs are actually
+ * reachable right now: the live transit input (if any), GDELT event volume
+ * and tone for that gate, and realised Brent spot volatility. Shared between
+ * `inspect_chokepoint` and `get_fuel_price_outlook` so a strait visit and its
+ * priced forecast read the same risk signal rather than two competing ones.
+ * @param {object} gate One of `CHOKEPOINTS`.
+ * @param {{current: number, history: number[]}|null} transitsInput
+ * @returns {Promise<object>} `computeDisruptionIndex`'s return shape.
+ */
+async function assessGateDisruption(gate, transitsInput) {
+  const [gdelt, spotSeries] = await Promise.all([
+    fetchGdeltTimeline(gate.id).catch(() => null),
+    fetchEiaSeries('spot-brent').catch(() => null),
+  ]);
+  const eventVolumeInput = gdelt?.status === 'ready' && Number.isFinite(gdelt.volume?.current)
+    ? gdelt.volume : null;
+  const eventToneInput = gdelt?.status === 'ready' && Number.isFinite(gdelt.tone?.current)
+    ? gdelt.tone : null;
+  const volatility = spotSeries?.status === 'ready' ? buildVolatilityHistory(spotSeries.points) : null;
+  const volatilityInput = Number.isFinite(volatility?.current) ? volatility : null;
+
+  return computeDisruptionIndex({
+    transits: transitsInput,
+    eventVolume: eventVolumeInput,
+    eventTone: eventToneInput,
+    volatility: volatilityInput,
+  });
+}
+
+/* -- Store agent plumbing -------------------------------------------------
+ * One resolver and one context gatherer shared by every store-agent tool,
+ * so a pulse, an offer recommendation and a campaign book asked about in the
+ * same conversation agree on which store and which conditions they are
+ * reasoning over.
+ */
+
+/** Tools routed to `src/storeAgent/`. */
+const STORE_AGENT_TOOLS = new Set([
+  'get_store_performance',
+  'get_store_pulse',
+  'get_member_intelligence',
+  'get_campaign_performance',
+  'recommend_offer',
+  'create_offer',
+  'deploy_offer',
+]);
+
+/**
+ * The last competitor set the console actually computed, so the pulse can
+ * name a real nearby brand as a cause instead of paying for a Places round
+ * trip on every reading. Empty until `analyze_competitors` or
+ * `get_full_insight` has run — and when it is empty, the competitor cause is
+ * simply not offered rather than invented.
+ * @type {object[]|null}
+ */
+let _lastCompetitors = null;
+
+/** Test hook: forget the cached competitor set. */
+export function resetCompetitorCache() {
+  _lastCompetitors = null;
+}
+
+/**
+ * Resolve the store and gather the live conditions the agent reasons over.
+ *
+ * @param {object} viewer
+ * @param {object} dataManager
+ * @param {object} args
+ * @param {{wantsConditions?: boolean}} [options]
+ * @returns {Promise<object>}
+ */
+async function gatherStoreContext(viewer, dataManager, args = {}, { wantsConditions = true } = {}) {
+  const cartographic = viewer?.camera?.positionCartographic;
+  const lat = Number.isFinite(args.latitude) ? args.latitude
+    : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : null);
+  const lon = Number.isFinite(args.longitude) ? args.longitude
+    : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : null);
+
+  let brief = null;
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    try {
+      brief = await fetchRegionalBrief(lat, lon);
+    } catch {
+      // No brief means no weather-attributed cause. That is a smaller loss
+      // than a store answer that refuses to appear.
+    }
+  }
+
+  const resolved = resolveStore({
+    sites: loadPortfolio(),
+    query: args.storeName || args.siteName || null,
+    lat,
+    lon,
+    placeLabel: brief?.place?.locality || brief?.place?.name || null,
+  });
+
+  const weather = brief?.weather
+    ? {
+      tempC: Number.isFinite(brief.weather.temperatureC) ? brief.weather.temperatureC : null,
+      condition: weatherCodeLabel(brief.weather.weatherCode),
+      precipMm: Number.isFinite(brief.weather.precipitationMm) ? brief.weather.precipitationMm : 0,
+    }
+    : {};
+
+  let traffic = null;
+  if (wantsConditions && Number.isFinite(resolved.site.lat) && Number.isFinite(resolved.site.lon)) {
+    try {
+      const delays = await fetchTrafficDelays(resolved.site.lat, resolved.site.lon, { radiusKm: 5 });
+      if (delays?.status === 'ready') {
+        traffic = {
+          bottleneckCount: delays.bottlenecks?.length || 0,
+          closureCount: delays.constructionZones?.length || 0,
+          maxDelayMinutes: delays.summary?.maxDelayMin ?? null,
+        };
+      }
+    } catch {
+      // Traffic unavailable simply removes one candidate cause.
+    }
+  }
+
+  return {
+    site: resolved.site,
+    how: resolved.how,
+    distanceKm: resolved.distanceKm,
+    now: new Date(),
+    weather,
+    traffic,
+    competitors: wantsConditions ? _lastCompetitors : null,
+    brand: resolved.site.name || null,
+  };
 }
 
 export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneDirector = null, annotations = null }) {
@@ -991,6 +1165,226 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
       return { ok: !result.error, action: 'activate_network', ...result };
     }
 
+    if (name === 'onboard_business') {
+      const businessName = String(args.businessName || '').trim();
+      if (!businessName) {
+        return { ok: false, action: 'onboard_business', error: 'empty-business-name' };
+      }
+      // The ontology decides the lens, not the model: the KPIs and layers that
+      // follow are the ones the matched vertical actually declares, rather than
+      // whatever sounded plausible mid-sentence.
+      const resolution = resolveCommercialIntent(
+        [businessName, args.industryHint || ''].filter(Boolean).join(' '),
+      );
+      const vertical = resolution.vertical;
+
+      // A brand claimed by more than one vertical (Chevron and Shell are both
+      // refiners and forecourt retailers) gets ASKED about, not guessed at —
+      // unless the operator already said which, via industryHint. Configuring
+      // the wrong half of an integrated major's business is a silent, and very
+      // confusing, failure.
+      const claimants = verticalsMatchingBrand(businessName);
+      if (claimants.length > 1 && !args.industryHint) {
+        return {
+          ok: true,
+          action: 'onboard_business',
+          businessName,
+          ambiguous: true,
+          candidates: claimants,
+          vertical: null,
+          layersEnabled: [],
+          portfolioTotal: loadPortfolio().length,
+          needs: `"${businessName}" exists in more than one industry here (${claimants.map((c) => c.name).join(' / ')}). Ask the operator which part of the business they run, then call onboard_business again with industryHint set. Do not pick one for them.`,
+        };
+      }
+
+      const lensSelect = typeof document !== 'undefined'
+        ? document.getElementById('industry-lens-select')
+        : null;
+      if (lensSelect && vertical?.id) {
+        lensSelect.value = vertical.id;
+        lensSelect.dispatchEvent(new Event('change'));
+      }
+
+      // The portfolio layer is what makes the operator's own sites visible, so
+      // it goes on for every vertical, not just the ones that happen to list it.
+      const wanted = [...new Set(['sites', ...(resolution.layersToEnable || [])])];
+      const layersEnabled = [];
+      const layersFailed = [];
+      for (const layerId of wanted) {
+        try {
+          await dataManager?.setEnabled?.(layerId, true, { origin: 'voice' });
+        } catch {
+          // Fall through to the state check — a thrown enable and a superseded
+          // one look the same from here, and neither is the answer.
+        }
+        // setEnabled resolves false when its intent was SUPERSEDED by a later
+        // one, which happens routinely while several layers come up together —
+        // and says nothing about whether the layer ended up on. Reporting that
+        // boolean marked live layers as failures. Ask the manager instead.
+        if (dataManager?.isEnabled?.(layerId)) layersEnabled.push(layerId);
+        else layersFailed.push(layerId);
+      }
+
+      return {
+        ok: true,
+        action: 'onboard_business',
+        businessName,
+        vertical: vertical?.id || null,
+        verticalName: vertical?.name || null,
+        sector: vertical?.sectorName || null,
+        confidence: resolution.confidence,
+        kpis: vertical?.kpis || [],
+        layersEnabled,
+        layersFailed,
+        // A region-wide sweep needs a region; say so rather than silently
+        // defaulting to whatever the camera happens to be looking at.
+        regionSweepSupported: Boolean(VERTICAL_OSM_FILTERS[vertical?.id]),
+        portfolioTotal: loadPortfolio().length,
+        needs: loadPortfolio().length === 0
+          ? 'Ask which region or country to sweep for this brand, then call discover_network.'
+          : null,
+      };
+    }
+
+    if (name === 'discover_network') {
+      const businessName = String(args.businessName || '').trim();
+      const region = String(args.region || '').trim();
+      if (!businessName || !region) {
+        return { ok: false, action: 'discover_network', error: 'businessName and region are both required' };
+      }
+      const verticalId = args.verticalId
+        || resolveCommercialIntent(businessName)?.vertical?.id
+        || null;
+      const result = await discoverAndAddNetwork(businessName, { region, verticalId });
+      return { ok: !result.error, action: 'discover_network', businessName, region, verticalId, ...result };
+    }
+
+    if (name === 'inspect_chokepoint') {
+      const gate = CHOKEPOINTS[String(args.chokepoint || 'hormuz').toLowerCase()] || CHOKEPOINTS.hormuz;
+
+      if (dataManager?.setEnabled && !dataManager.isEnabled?.('ais-live-vessels')) {
+        try {
+          await dataManager.setEnabled('ais-live-vessels', true, { origin: 'voice' });
+        } catch {}
+      }
+
+      if (viewer?.camera && args.flyTo !== false) {
+        viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(gate.west, gate.south, gate.east, gate.north),
+          duration: 3.0,
+        });
+      }
+
+      // The vessel feed is VIEWPORT-SCOPED and refreshes on its own cadence, so
+      // the contacts in memory the instant the camera arrives are still the
+      // previous view's. Counting them here produced a confident "0 tankers in
+      // Hormuz" while holding 2,000 vessels from North America — a false zero,
+      // which is worse than no answer. So: wait for contacts to actually appear
+      // inside the gate, and if none ever do, say the feed has not covered it
+      // rather than reporting an empty strait.
+      const aisModule = dataManager?.layers?.get?.('ais-live-vessels')?.module;
+      // getAnalystRecords defaults to the first 2,000 records, which is an
+      // arbitrary window over a feed holding ~11,000: measured here, the default
+      // slice showed 0 vessels in Malacca while the layer actually held 41. A
+      // gate count has to see everything the layer has, or it silently measures
+      // the truncation instead of the strait.
+      const readVessels = () => aisModule?.getAnalystRecords?.(50_000) || [];
+      const contactsInGate = (vessels) => vessels.filter((v) => (
+        Number.isFinite(v?.lat) && Number.isFinite(v?.lon)
+        && v.lat >= gate.south && v.lat <= gate.north
+        && v.lon >= gate.west && v.lon <= gate.east
+      ));
+
+      const waitMs = Number.isFinite(args.waitMs) ? Math.min(Math.max(args.waitMs, 0), 90_000) : 45_000;
+      const deadline = Date.now() + waitMs;
+      let vessels = readVessels();
+      let covering = contactsInGate(vessels);
+      while (covering.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        vessels = readVessels();
+        covering = contactsInGate(vessels);
+      }
+
+      if (covering.length === 0) {
+        return {
+          ok: false,
+          action: 'inspect_chokepoint',
+          chokepoint: gate.id,
+          gateName: gate.name,
+          note: gate.note,
+          status: 'awaiting-vessel-feed',
+          tankersInGate: null,
+          vesselsObserved: vessels.length,
+          error: `The AIS feed has not delivered any contacts inside ${gate.name} yet, so tanker traffic cannot be counted. This is not a count of zero — it is no coverage.`,
+        };
+      }
+
+      const { count, vessels: inside, inGate, unclassified } = countTankersInGate(vessels, gate);
+
+      // The count alone answers "how busy is it", not "what does that mean
+      // for fuel prices" — so this feeds the same disruption index the priced
+      // forecast reads, rather than leaving that connection to a second
+      // question the operator has to know to ask.
+      const transitsInput = await computeGateTransitsInput(gate, { count, unclassified }, inGate);
+      const disruptionIndex = await assessGateDisruption(gate, transitsInput);
+
+      return {
+        ok: true,
+        action: 'inspect_chokepoint',
+        chokepoint: gate.id,
+        gateName: gate.name,
+        note: gate.note,
+        status: 'ready',
+        tankersInGate: count,
+        vesselsInGate: inGate,
+        unclassifiedInGate: unclassified,
+        vesselsObserved: vessels.length,
+        sample: inside.slice(0, 5).map((v) => ({ name: v.name || null, shipType: v.shipType || null })),
+        measurement: `Instantaneous count of live AIS contacts inside the gate box, not a transit rate. ${inGate} contacts in the gate, ${count} identified as tankers, ${unclassified} carrying no ship type at all — so the tanker figure is a floor, not a total.`,
+        disruptionIndex,
+      };
+    }
+
+    if (name === 'return_to_portfolio') {
+      const sites = loadPortfolio().filter((s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon));
+      if (sites.length === 0) {
+        return { ok: false, action: 'return_to_portfolio', error: 'no-geocoded-sites', siteCount: 0 };
+      }
+      const lats = sites.map((s) => s.lat);
+      const lons = sites.map((s) => s.lon);
+      const south = Math.min(...lats);
+      const north = Math.max(...lats);
+      const west = Math.min(...lons);
+      const east = Math.max(...lons);
+      const padLat = Math.max(0.05, (north - south) * 0.15);
+      const padLon = Math.max(0.05, (east - west) * 0.15);
+      if (viewer?.camera) {
+        viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(
+            Math.max(-180, west - padLon),
+            Math.max(-90, south - padLat),
+            Math.min(180, east + padLon),
+            Math.min(90, north + padLat),
+          ),
+          duration: 3.0,
+        });
+      }
+      return {
+        ok: true,
+        action: 'return_to_portfolio',
+        siteCount: sites.length,
+        bounds: { south, west, north, east },
+      };
+    }
+
+    if (name === 'regeocode_pending_sites') {
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      const result = await regeocodePendingSites({ biasLat, biasLon });
+      return { ok: true, action: 'regeocode_pending_sites', ...result };
+    }
+
     if (name === 'search_address_or_business') {
       const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
       const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
@@ -1006,11 +1400,18 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
     }
 
     if (name === 'analyze_competitors') {
-      const biasLat = Number.isFinite(args.latitude) ? args.latitude : undefined;
-      const biasLon = Number.isFinite(args.longitude) ? args.longitude : undefined;
+      // Without an explicit lat/lon, this must search where the operator is
+      // actually looking, not silently fall back to Austin — a "who beats me
+      // here" question asked while looking at Denver must search Denver.
+      const cartographic = viewer?.camera?.positionCartographic;
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : undefined);
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : undefined);
       const brand = args.brandName ? String(args.brandName).trim() : null;
       const comps = Array.isArray(args.competitors) ? args.competitors : null;
       const result = await analyzeCompetitivePosition(brand, comps, { biasLat, biasLon });
+      if (result.success) await placeCompetitorsOnMap(dataManager, result.competitorSites);
       return { ok: result.success, action: 'analyze_competitors', ...result };
     }
 
@@ -1042,20 +1443,46 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
       const lon = Number.isFinite(args.longitude) ? args.longitude
         : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : null);
       const padd = paddForCoords(lat, lon);
+      const gate = CHOKEPOINTS[String(args.chokepoint || 'hormuz').toLowerCase()] || CHOKEPOINTS.hormuz;
 
       // The risk overlay only participates when the vessel layer is actually
       // loaded — otherwise the index would rest on an absent input.
       let disruption = null;
+      let transitsInput = null;
       try {
-        const vessels = dataManager.layers.get('ais-live-vessels')?.module?.getAnalystRecords?.() || [];
+        // Full slice, not the default 2,000-record window — see inspect_chokepoint.
+        const vessels = dataManager.layers.get('ais-live-vessels')?.module?.getAnalystRecords?.(50_000) || [];
         if (vessels.length > 0) {
-          const gate = CHOKEPOINTS[String(args.chokepoint || 'hormuz').toLowerCase()] || CHOKEPOINTS.hormuz;
-          const { count } = countTankersInGate(vessels, gate);
-          disruption = { gate: gate.name, tankersInGate: count };
+          const inGate = vessels.filter((v) => (
+            Number.isFinite(v?.lat) && Number.isFinite(v?.lon)
+            && v.lat >= gate.south && v.lat <= gate.north
+            && v.lon >= gate.west && v.lon <= gate.east
+          ));
+          // No contacts in the gate means the feed does not cover it, which is
+          // not the same as an empty strait and must not read as a zero.
+          if (inGate.length === 0) {
+            disruption = { gate: gate.name, coverage: 'none', tankersInGate: null };
+          } else {
+            const tankerInfo = countTankersInGate(vessels, gate);
+            disruption = {
+              gate: gate.name,
+              coverage: 'live',
+              vesselsInGate: inGate.length,
+              tankersInGate: tankerInfo.count,
+            };
+            transitsInput = await computeGateTransitsInput(gate, tankerInfo, inGate.length);
+          }
         }
       } catch {}
 
-      const model = await buildRegionalPriceModel({ padd });
+      // The other two disruption-index inputs, gathered concurrently, plus the
+      // transit input above — see `assessGateDisruption`. Each reports its own
+      // absence rather than dropping silently out of the weighted index.
+      const disruptionIndex = await assessGateDisruption(gate, transitsInput);
+
+      // The one place the disruption index is allowed to touch the price
+      // band: it widens the upper bound (L3), never the central path.
+      const model = await buildRegionalPriceModel({ padd, disruptionIndex: disruptionIndex.index });
       return {
         ok: model.status === 'ready',
         action: 'get_fuel_price_outlook',
@@ -1063,6 +1490,7 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
         ...model,
         ...(model.status === 'ready' ? { readout: describeModel(model.model, model.validation) } : {}),
         disruption,
+        disruptionIndex,
       };
     }
 
@@ -1191,6 +1619,220 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
         windKph,
         summary,
       };
+    }
+
+    if (name === 'get_airspace_brief') {
+      // National, not camera-scoped: the FAA programs and the US airborne
+      // count are the same wherever the view is. Server-side feeds only.
+      return fetchAirspaceBrief();
+    }
+
+    if (name === 'get_local_news') {
+      let lat = Number.isFinite(args.latitude) ? args.latitude : null;
+      let lon = Number.isFinite(args.longitude) ? args.longitude : null;
+
+      if ((!lat || !lon) && args.locationQuery) {
+        try {
+          const fuzzy = await executeJarvisFuzzySearch(args.locationQuery);
+          if (fuzzy?.bestMatch?.lat && fuzzy?.bestMatch?.lon) {
+            lat = fuzzy.bestMatch.lat;
+            lon = fuzzy.bestMatch.lon;
+          }
+        } catch {}
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        const cartographic = viewer?.camera?.positionCartographic;
+        if (cartographic) {
+          lat = Cesium.Math.toDegrees(cartographic.latitude);
+          lon = Cesium.Math.toDegrees(cartographic.longitude);
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return { ok: false, action: 'get_local_news', error: 'no-location', articles: [] };
+      }
+
+      try {
+        const brief = await fetchRegionalBrief(lat, lon);
+        const articles = Array.isArray(brief?.articles) ? brief.articles : [];
+        return {
+          ok: articles.length > 0,
+          action: 'get_local_news',
+          latitude: lat,
+          longitude: lon,
+          place: brief?.place || null,
+          newsSource: brief?.newsSource || null,
+          articles,
+          readout: articles.length
+            ? `LOCAL NEWS — ${articles.length} recent item${articles.length === 1 ? '' : 's'} near ${brief?.place?.label || 'this location'}, via ${brief?.newsSource || 'unknown source'}.`
+            : 'LOCAL NEWS — no recent items found near this location.',
+        };
+      } catch (error) {
+        return { ok: false, action: 'get_local_news', error: error?.message || 'regional-brief-unavailable', articles: [] };
+      }
+    }
+
+    if (name === 'get_full_insight') {
+      // Resolved once, up front, so every sub-engine below — competitors
+      // included — reasons about the same place: an explicit arg if given,
+      // else where the camera actually is, never a silent Austin default.
+      const cartographic = viewer?.camera?.positionCartographic;
+      const biasLat = Number.isFinite(args.latitude) ? args.latitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.latitude) : undefined);
+      const biasLon = Number.isFinite(args.longitude) ? args.longitude
+        : (cartographic ? Cesium.Math.toDegrees(cartographic.longitude) : undefined);
+      const brand = args.brandName ? String(args.brandName).trim() : null;
+      const comps = Array.isArray(args.competitors) ? args.competitors : null;
+      const scope = args.scope === 'portfolio' ? 'portfolio' : 'view';
+
+      // 1. Competitors — same engine and rendering path as analyze_competitors,
+      // so a full-insight run leaves the same pins on the map.
+      const competitors = await analyzeCompetitivePosition(brand, comps, { biasLat, biasLon });
+      if (competitors.success) await placeCompetitorsOnMap(dataManager, competitors.competitorSites);
+
+      // 2. Traffic/price rollup, scoped to the view or the whole portfolio.
+      const providers = analystProviders(viewer, dataManager, {
+        recordLimitByLayer: { sites: Number.MAX_SAFE_INTEGER, traffic: Number.MAX_SAFE_INTEGER },
+      });
+      const health = scope === 'portfolio' ? getPortfolioHealth(providers) : getViewHealth(providers);
+
+      const lat = Number.isFinite(biasLat) ? biasLat : null;
+      const lon = Number.isFinite(biasLon) ? biasLon : null;
+
+      // 3. Fuel price anchor + forecast. Deliberately WITHOUT the chokepoint
+      // disruption overlay — that is its own round of AIS/GDELT calls with a
+      // long wait built in (see inspect_chokepoint); get_fuel_price_outlook
+      // remains the tool for that. This is the L1/L2 band only.
+      let price = { status: 'unavailable' };
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        try {
+          price = await buildRegionalPriceModel({ padd: paddForCoords(lat, lon) });
+        } catch {
+          price = { status: 'error' };
+        }
+      }
+
+      // 4. Modelled busyness per client site actually scored above — never a
+      // store-level footfall claim, always road congestion × time-of-day.
+      const portfolioById = new Map(loadPortfolio().map((s) => [s.id, s]));
+      const busyness = (competitors.siteBreakdowns || []).slice(0, 5).map((breakdown) => ({
+        siteId: breakdown.siteId,
+        siteName: breakdown.siteName,
+        ...estimateBusyness(
+          { trafficLevel: breakdown.trafficLevel },
+          { format: portfolioById.get(breakdown.siteId)?.format || null },
+        ),
+      }));
+
+      // 5. Local news for the same location, source labelled honestly.
+      let news = { status: 'unavailable', articles: [], newsSource: null, place: null };
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        try {
+          const brief = await fetchRegionalBrief(lat, lon);
+          news = {
+            status: brief.newsStatus,
+            articles: brief.articles || [],
+            newsSource: brief.newsSource || null,
+            place: brief.place || null,
+          };
+        } catch {}
+      }
+
+      // 6. Top plays already computed per site by analyzeCompetitivePosition,
+      // deduplicated by play id across sites.
+      const seenPlayIds = new Set();
+      const topPlays = [];
+      for (const breakdown of competitors.siteBreakdowns || []) {
+        for (const play of breakdown.plays || []) {
+          if (seenPlayIds.has(play.id)) continue;
+          seenPlayIds.add(play.id);
+          topPlays.push({ ...play, siteName: breakdown.siteName });
+        }
+      }
+
+      return {
+        ok: true,
+        action: 'get_full_insight',
+        scope,
+        competitors,
+        health,
+        price,
+        busyness,
+        news,
+        plays: topPlays.slice(0, 5),
+      };
+    }
+
+    /* -- Store agent ------------------------------------------------------
+     * Six tools over one store's transaction, member, campaign and content
+     * surface. They share a context gatherer so that a pulse, an offer
+     * recommendation and a campaign book asked about in the same breath all
+     * reason about the same store under the same conditions -- an operator
+     * who hears three different weather readings in one conversation stops
+     * believing any of them.
+     */
+    if (STORE_AGENT_TOOLS.has(name)) {
+      const context = await gatherStoreContext(viewer, dataManager, args, {
+        // Only the tools that actually reason about conditions pay for the
+        // traffic and competitor round trips.
+        wantsConditions: name !== 'get_store_performance' && name !== 'get_member_intelligence',
+      });
+      if (!current()) return { ok: false, action: name, error: 'superseded' };
+      const { site, how, distanceKm, ...conditions } = context;
+
+      const base = {
+        ok: true,
+        action: name,
+        storeResolvedBy: how,
+        storeDistanceKm: distanceKm,
+      };
+
+      if (name === 'get_store_performance') {
+        return { ...base, ...storePerformance(site, { period: args.period, ...conditions }) };
+      }
+      if (name === 'get_store_pulse') {
+        return { ...base, ...storePulse(site, conditions) };
+      }
+      if (name === 'get_member_intelligence') {
+        return {
+          ...base,
+          ...memberIntelligence(site, {
+            focus: args.focus,
+            segmentId: args.segmentId,
+            memberId: args.memberId,
+            signals: Array.isArray(args.signals) ? args.signals : null,
+            ...conditions,
+          }),
+        };
+      }
+      if (name === 'get_campaign_performance') {
+        return { ...base, ...campaignPerformance(site, { status: args.status, ...conditions }) };
+      }
+      if (name === 'recommend_offer') {
+        return { ...base, ...recommendOffers(site, { goal: args.goal, limit: args.limit, ...conditions }) };
+      }
+      if (name === 'create_offer') {
+        return {
+          ...base,
+          ...stageOffer(site, {
+            offerId: args.offerId,
+            name: args.name,
+            description: args.description,
+            headline: args.headline,
+            valueLabel: args.valueLabel,
+            segmentId: args.segmentId,
+            surfaces: Array.isArray(args.surfaces) ? args.surfaces : null,
+            durationDays: args.durationDays,
+          }, conditions),
+        };
+      }
+      // deploy_offer
+      const deployed = publishOffer({
+        offerId: args.offerId || null,
+        surfaces: Array.isArray(args.surfaces) ? args.surfaces : null,
+        sendPush: args.sendPush,
+        now: conditions.now,
+      });
+      return { ...base, ...deployed, ok: deployed.ok !== false };
     }
 
     if (name === 'control_weather_effects') {
@@ -3596,6 +4238,37 @@ function activeContactsWindow() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Draw discovered competitor sites on the globe the same way the manual
+ * "Competitive Analysis Matrix" panel button already does
+ * (`sitesPanel.js`'s `renderCompetitorsView`), so calling `analyze_competitors`
+ * or `get_full_insight` by voice/chat produces the same pins, not just text.
+ * @param {object} dataManager
+ * @param {object[]} competitorSites
+ * @returns {Promise<void>}
+ */
+async function placeCompetitorsOnMap(dataManager, competitorSites) {
+  if (!Array.isArray(competitorSites) || competitorSites.length === 0) return;
+  // Remember them for the store agent, which names a nearby brand as a
+  // candidate cause for a transaction dip rather than paying for its own
+  // Places round trip on every pulse reading.
+  _lastCompetitors = competitorSites.slice(0, 8);
+  if (dataManager?.setEnabled && !dataManager.isEnabled?.('sites')) {
+    try {
+      await dataManager.setEnabled('sites', true, { origin: 'voice' });
+    } catch {
+      // A failed enable still lets the render call below run against
+      // whatever heatmap datasource already exists.
+    }
+  }
+  sitesLayer.setHeatmapVisible(true);
+  renderHeatmapData({
+    clientSites: loadPortfolio().filter((s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon)),
+    competitorSites,
+    mode: 'competitor',
+  });
 }
 
 function analystProviders(viewer, dataManager, { recordLimitByLayer = null } = {}) {

@@ -17,10 +17,43 @@ test('operator questions route to the engine that answers them', () => {
     ['how is my whole portfolio doing', 'get_portfolio_health'],
     ['any construction near my stores', 'get_traffic_delays_and_construction'],
     ['how is this view doing', 'get_view_health'],
+    ['how busy is the Strait of Hormuz right now', 'inspect_chokepoint'],
+    ['what is happening at this chokepoint', 'inspect_chokepoint'],
   ];
   for (const [question, action] of cases) {
     assert.equal(routeQuestion(question).action, action, question);
   }
+});
+
+test('a store question carries its own specifics through as arguments', () => {
+  // The typed front door must not lose what the sentence said. "Build me a
+  // 99 cent coffee offer" that arrives at the offer studio as `{}` builds
+  // whatever ranks first, and the operator watches a fountain drink appear.
+  const build = routeQuestion('build me a 99 cent coffee offer');
+  assert.equal(build.action, 'create_offer');
+  assert.equal(build.args.description, 'build me a 99 cent coffee offer');
+
+  assert.equal(routeQuestion('how did the store do today').args.period, 'today');
+  assert.equal(routeQuestion('how is this store doing this week').args.period, 'week');
+  assert.equal(routeQuestion('how was the store this month').args.period, 'month');
+
+  assert.equal(routeQuestion('who is on the loyalty file').args.focus, 'segments');
+  assert.equal(routeQuestion('show me a member').args.focus, 'member');
+  assert.equal(routeQuestion('can you identify that transaction').args.focus, 'identity');
+});
+
+test('a named chokepoint in the question is passed through as an argument', () => {
+  const hormuz = routeQuestion('how busy is the strait of hormuz right now');
+  assert.equal(hormuz.action, 'inspect_chokepoint');
+  assert.equal(hormuz.args.chokepoint, 'hormuz');
+
+  const malacca = routeQuestion('what will fuel cost given traffic through the strait of malacca');
+  assert.equal(malacca.action, 'get_fuel_price_outlook');
+  assert.equal(malacca.args.chokepoint, 'malacca');
+
+  const noName = routeQuestion('what will fuel cost me in two weeks');
+  assert.equal(noName.action, 'get_fuel_price_outlook');
+  assert.equal(noName.args.chokepoint, undefined);
 });
 
 test('the more specific intent wins when two patterns could match', () => {

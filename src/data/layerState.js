@@ -289,6 +289,11 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'radio', token: 'r', disposition: 'enabled+options', optionOwner: 'radio' }),
   Object.freeze({ id: 'rocket-launches', token: 'x', disposition: 'enabled-only' }),
   Object.freeze({ id: 'satellites', token: 's', disposition: 'enabled+options', optionOwner: 'satellites' }),
+  // The operator's own portfolio dots. Registered like any other layer so the
+  // globe can actually render it — before this entry existed the module was
+  // written, imported and driven by the SITES panel but never registered, so
+  // `setEnabled('sites')` silently failed and no site ever drew on the globe.
+  Object.freeze({ id: 'sites', token: 'p', disposition: 'enabled-only' }),
   Object.freeze({ id: 'telegeography-submarine-cables', token: 'u', disposition: 'enabled-only' }),
   Object.freeze({ id: 'traffic', token: 't', disposition: 'enabled-only' }),
 ]);

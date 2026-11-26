@@ -40,6 +40,15 @@ import {
   isOverBudget as isTomTomOverBudget,
 } from './src/data/tomtomTiles.js';
 import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
+import {
+  binDetections,
+  createFirmsHistoryStore,
+  dayStartMs,
+  decodeFirmsHistory,
+  historyDays,
+  utcDay,
+} from './src/timeline/firmsHistory.js';
+import { parseGdeltSeries } from './src/timeline/gdeltSeries.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
@@ -61,6 +70,7 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
+import { createAirspaceService } from './src/airspace/airspaceService.js';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1324,6 +1334,14 @@ const OPENAI_REALTIME_REASONING_DEFAULT = 'low';
 const OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT = 16000;
 const OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT = 0.95;
 const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
+// Realtime's models (gpt-realtime-*) are voice-session-only and reject plain
+// /v1/chat/completions requests outright, so the typed chat cannot default to
+// OPENAI_REALTIME_MODEL. The HUD summary's nano tier (OPENAI_HUD_SUMMARY_MODEL)
+// is Chat-Completions-compatible but does not reliably follow the terse,
+// no-fluff, decisive-recommendation format this assistant is instructed to
+// use (verified: it ignores the format constraints where gpt-5.5 follows them)
+// — so chat gets its own, stronger default instead of inheriting HUD's.
+const OPENAI_CHAT_MODEL_DEFAULT = 'gpt-5.5';
 const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.r1-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
 const REALTIME_DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
@@ -1964,11 +1982,20 @@ function tomtomProxy() {
  * fetch across dev-server restarts. Pattern mirrors celestrakProxy.
  *
  * Routes:
- *   GET /api/firms        → {fetchedAt, stale, ttlMs, sources, count, fires}
- *   GET /api/firms/status → {hasKey, lastFetch, count, stale, ttlMs, transactions}
+ *   GET /api/firms              → {fetchedAt, stale, ttlMs, sources, count, fires}
+ *   GET /api/firms/status       → {hasKey, lastFetch, count, stale, ttlMs, transactions}
+ *   GET /api/firms/history      → time-slider coverage: per-day status + hourly counts
+ *   GET /api/firms/history/data → the same detections, binary (src/timeline/firmsHistory.js)
+ *
+ * History: nine UTC days kept one file per day under .r1-cache/firms-history/,
+ * backfilled on the first /history request in FIRMS-sized chunks (DAY_RANGE
+ * ≤ 5, forward from DATE) and topped up by every live refresh. A day is
+ * re-fetched only until it is final (6 h after it ended). A day no source
+ * could fetch is reported as a gap, never as "no fires".
  *
  * Keyless (no FIRMS_MAP_KEY): /api/firms → 503 {error:'no_key'}; status →
- * {hasKey:false}. Upstream is never touched without a key.
+ * {hasKey:false}; history → {status:'no-key'}. Upstream is never touched
+ * without a key.
  *
  * @returns {import('vite').Plugin}
  */
@@ -1978,6 +2005,24 @@ function firmsProxy() {
   const SOURCES = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
   const CACHE_DIR = path.join(process.cwd(), '.r1-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'firms.json');
+  const HISTORY_DIR = path.join(CACHE_DIR, 'firms-history');
+  const HOUR_MS = 3_600_000;
+  // Day names come only from historyDays() — never from the request — so the
+  // file path cannot be steered by a client.
+  const historyFile = (day) => path.join(HISTORY_DIR, `${day}.json`);
+  const history = createFirmsHistoryStore({
+    sources: SOURCES,
+    fetchChunk: (source, startDay, range) => fetchSource(mapKey(), source, { days: range, date: startDay }),
+    loadDay: async (day) => JSON.parse(await fsp.readFile(historyFile(day), 'utf8')),
+    saveDay: async (day, obj) => {
+      await fsp.mkdir(HISTORY_DIR, { recursive: true });
+      await fsp.writeFile(historyFile(day), JSON.stringify(obj), 'utf8');
+    },
+    ttlMs: TTL_MS,
+    log: (...args) => console.warn('[firms-history]', ...args),
+  });
+  /** @type {?{key: string, payload: object}} hourly-count cache per store version + hour */
+  let historyMetaCache = null;
 
   /** @type {?{at: number, sources: Array<object>, fires: Array<object>}} */
   let mem = null;
@@ -2016,9 +2061,13 @@ function firmsProxy() {
    * (FIRMS reports errors as HTML/plain text, never CSV). Never log the URL —
    * it embeds the MAP_KEY.
    */
-  async function fetchSource(key, source) {
-    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/2`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  async function fetchSource(key, source, { days = 2, date = null } = {}) {
+    if (!key) throw new Error('no key');
+    const range = Math.max(1, Math.min(5, Math.floor(Number(days) || 2)));
+    const datePart = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `/${date}` : '';
+    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/${range}${datePart}`;
+    // A five-day world pull is ~20 MB of CSV; give it longer than the live pull.
+    const res = await fetch(url, { signal: AbortSignal.timeout(datePart ? 180_000 : 60_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const records = parseFirmsCsv(await res.text());
     if (records === null) throw new Error('non-CSV upstream response');
@@ -2037,9 +2086,14 @@ function firmsProxy() {
     const fires = [];
     for (const source of SOURCES) {
       try {
-        const records = filterTrailing24h(await fetchSource(key, source), now);
+        const raw = await fetchSource(key, source);
+        const records = filterTrailing24h(raw, now);
         sources.push({ source, count: records.length, ok: true });
         fires.push(...records);
+        // The same two-day pull keeps the slider's open days current at no
+        // extra upstream cost. Best-effort: history never blocks live.
+        history.ingestLive(source, raw, now, [utcDay(now - 86_400_000), utcDay(now)])
+          .catch((err) => console.warn('[firms-history] live ingest failed:', err?.message || err));
       } catch (err) {
         console.warn(`[firms-proxy] ${source} fetch failed:`, err?.message || err);
         sources.push({ source, count: 0, ok: false });
@@ -2095,10 +2149,53 @@ function firmsProxy() {
     return statusInflight;
   }
 
-  return {
-    name: 'firms-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/firms', async (req, res) => {
+  /**
+   * Coverage + hourly detection counts for the time slider's trend lane.
+   * Kicks the store's (single-flight, per-day TTL'd) refresh; never waits on it.
+   */
+  async function historyMeta() {
+    // Disk first, so a restarted server answers with what it already holds
+    // instead of an empty store that reads as "building from nothing".
+    await history.load();
+    history.refresh().catch((err) => console.warn('[firms-history] refresh failed:', err?.message || err));
+    const status = history.status();
+    const now = Date.now();
+    const cacheKey = `${status.version}:${Math.floor(now / HOUR_MS)}`;
+    let hourly = historyMetaCache?.key === cacheKey ? historyMetaCache.hourly : null;
+    if (!hourly) {
+      const days = historyDays(now);
+      const startMs = dayStartMs(days[0]);
+      const decoded = decodeFirmsHistory(history.encoded().buffer);
+      hourly = {
+        startMs,
+        binMs: HOUR_MS,
+        counts: binDetections(decoded, { startMs, endMs: Math.floor(now / HOUR_MS) * HOUR_MS + HOUR_MS, binMs: HOUR_MS }),
+      };
+      historyMetaCache = { key: cacheKey, hourly };
+    }
+    const anyDay = status.days.some((d) => d.ok);
+    const missingDay = status.days.some((d) => !d.ok);
+    // "building" means a day is still missing and being fetched. Topping up
+    // the open days (today, and yesterday until it is final) is `refreshing`.
+    let state = 'unavailable';
+    if (status.building && missingDay) state = 'building';
+    else if (anyDay) state = 'ready';
+    return {
+      status: state,
+      refreshing: status.building,
+      version: status.version,
+      lastError: status.lastError,
+      count: status.count,
+      days: status.days,
+      hourly,
+      windowMs: 24 * HOUR_MS,
+      provenance: 'measured',
+      attribution: 'NASA FIRMS (VIIRS NRT)',
+    };
+  }
+
+  function install(middlewares) {
+      middlewares.use('/api/firms', async (req, res) => {
         const sendJson = (status, obj) => {
           if (res.headersSent) return;
           res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -2108,6 +2205,31 @@ function firmsProxy() {
           const subPath = String(req.url || '').split('?')[0];
           const key = mapKey();
           await readDiskOnce();
+
+          if (subPath === '/history' || subPath === '/history/data') {
+            if (req.method !== 'GET') {
+              sendJson(405, { error: 'Method Not Allowed' });
+              return;
+            }
+            if (!key) {
+              sendJson(subPath === '/history' ? 200 : 503, { status: 'no-key', provenance: 'unavailable' });
+              return;
+            }
+            if (subPath === '/history') {
+              sendJson(200, await historyMeta());
+              return;
+            }
+            await history.load();
+            const bytes = history.encoded();
+            res.writeHead(200, {
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(bytes.byteLength),
+              'Cache-Control': 'no-store',
+              'X-FIRMS-History-Version': String(history.version),
+            });
+            res.end(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+            return;
+          }
 
           if (subPath === '/status') {
             if (!key) {
@@ -2166,7 +2288,12 @@ function firmsProxy() {
           sendJson(500, { error: 'firms proxy error' });
         }
       });
-    },
+  }
+
+  return {
+    name: 'firms-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
   };
 }
 
@@ -4957,6 +5084,30 @@ function trackBackfillProxies() {
  * Keeps OPENAI_API_KEY server-side while the browser connects to the
  * Realtime API over WebRTC with a short-lived secret.
  */
+/*
+ * REMOVED: the remote `par_intelligence` MCP tool.
+ *
+ * The Realtime session used to append an `mcp`-type tool pointed at an
+ * external POS/loyalty server whenever PAR_INTELLIGENCE_MCP_URL and
+ * PAR_INTELLIGENCE_MCP_API_KEY were both set. That route is gone. Store
+ * performance, loyalty, member and offer capability is now served in-process
+ * by `src/storeAgent/`, reached through ordinary function tools in
+ * R1_REALTIME_TOOLS below (get_store_performance, get_store_pulse,
+ * get_member_intelligence, get_campaign_performance, recommend_offer,
+ * create_offer, deploy_offer).
+ *
+ * Three reasons that is the better shape here, if anyone is tempted to put it
+ * back: the results now flow through the explain bus and draw a board, which
+ * an out-of-process MCP tool call never did; the tool schemas are covered by
+ * the two pins in src/firstRunExperience.test.mjs and src/radioMarkup.test.mjs,
+ * so a silent change to what the model can do fails a test; and nothing is
+ * handed to OpenAI's infrastructure to call on our behalf.
+ *
+ * If a real operator stack is wired up later, the seam is the exports of
+ * `src/storeAgent/storeAgent.js` -- same shapes, different source -- not a
+ * second tool transport.
+ */
+
 function openAiRealtimeProxy() {
   function install(middlewares) {
     middlewares.use('/api/openai/hud-summary', async (req, res) => {
@@ -5167,6 +5318,10 @@ function openAiRealtimeProxy() {
             'For "how is this view doing?", "how are things looking here?", "what is happening at my sites on screen" — call get_view_health. For "how is my whole business doing?", "how is the portfolio?", "overall health" — call get_portfolio_health. Read the coverage honestly: if flow was measured for 3 of 40 sites, say the reading covers 3 of 40. Never average away a null or present a partial reading as the whole picture.',
             'For fuel price questions — "what will fuel cost?", "where are prices going?", "how do my prices compare?", "is my fuel cost about to move?" — call get_fuel_price_outlook. Report the anchor as a published EIA figure, the forecast as a BAND with both bounds, and the backtest MAE against the naive baseline. If beatsNaive is false, say the model does not beat assuming prices stay flat. If a disruption index is present, say only that RISK has risen and name the tanker count behind it — never translate a risk index into a predicted price.',
             'Absolute rule for every retail tool: a null figure means it was NOT measured. Say "not measured" or "no reading". Never substitute a plausible number, never round a null to zero, and never describe a modelled or ranked index as a measured volume, a footfall, or a dollar amount.',
+            'STORE AGENT — the operator\'s own POS, loyalty and offer stack for ONE store. Route by what is being asked: trading performance over a period ("how is this store doing", "how was this week", "which days were strong", "what is soft") is get_store_performance. Anything about RIGHT NOW ("are we seeing a dip", "what is happening", "why are we down", "business score this hour") is get_store_pulse. The loyalty file ("who is on the file", "what segments", "who is lapsing", "show me a member", "can you identify that transaction", "who was that") is get_member_intelligence with focus segments / member / identity. Running campaigns ("what is running", "which campaigns are working", "is the program paying", "what should I kill") is get_campaign_performance. "What should I run" / "which offer would resonate" is recommend_offer. "Build it" / "make me that offer" is create_offer. "Push it live" is deploy_offer. These are store-level and always resolve one store: the one named, else the nearest site to the camera, else the store under the camera. Say which store you answered about the first time in a conversation.',
+            'STORE AGENT NARRATION. Speak like the person who runs the place. One sentence with the figure that matters, one with why, one with what to do — then stop. Never read a field list. Counts and dollars from the POS and loyalty file are MEASURED and stated flatly. A forecast, a redemption expectation, a churn probability or a campaign plan is MODELLED and must be said as an expectation with its basis ("that mechanic has run at about 28% here across seven prior runs"), never as a promise ("this will lift sales 28%"). Campaign performance has two columns that must never merge: what a campaign HAS DONE is measured, what it was FORECAST to do is modelled, and "doing well" is the comparison. A campaign beating its redemption plan while losing money is the single most useful thing in the book — when the result flags that divergence, lead with it and name the cannibalisation behind it. An identity match below the auto-merge bar is "matched, held for review", never "we know who that was".',
+            'STORE AGENT ACTIONS. create_offer BUILDS and STAGES; deploy_offer PUBLISHES. They are two decisions and you never collapse them: building an offer is not permission to push it, so after create_offer say it is staged and ready and wait. The console draws the actual artwork on screen for every surface, so describe the offer in one line and let the operator look at it — do not read the headline, sub-copy or terms aloud. Only call deploy_offer when the operator has plainly said to push it live, launch it, publish it, or go. A mobile-app deployment sends a push notification and a sent push CANNOT be recalled: say that out loud when one goes out, and if the operator seems to be thinking aloud rather than deciding, ask before you send it.',
+            'When answering an intelligence question (portfolio, competitors, traffic, cool-off, fuel price, view health) rather than confirming a command, speak like an operator, not a report: one sentence naming the signal that matters most — tied to gallons, loyalty/repeat-visit habits, or basket size, not a trivia figure for its own sake — at most one more sentence of why if it is not obvious, then one clear recommended action. Never read back every field a tool returned, and never close by listing other things you could check — say the one thing worth doing and stop.',
             'For weather requests — "what\'s the weather?", "is it raining in Tokyo?", "temperature in Paris", "weather conditions" — call get_weather. It returns full meteorological data: temperature, conditions (RAIN, CLEAR, SNOW, THUNDERSTORM), precipitation mm, wind speed, and cloud cover. Read the weather conditions and temperature clearly.',
             'For weather effect controls — "turn on rain", "show weather effects", "turn off rain" — call control_weather_effects with enabled=true/false.',
             'For heatmap requests — "show heatmap", "switch heatmap to competitors / traffic / cool-off" — call toggle_competitive_heatmap with the requested mode.',
@@ -5227,6 +5382,144 @@ function openAiRealtimeProxy() {
 
   return {
     name: 'openai-realtime-proxy',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
+}
+
+// Tools that only make sense for a persistent typed conversation, not a
+// realtime voice turn — kept separate from R1_REALTIME_TOOLS so that pinned
+// schema (src/firstRunExperience.test.mjs, src/radioMarkup.test.mjs) never
+// has to move for a chat-only capability.
+const CHAT_ONLY_TOOLS = [
+  {
+    type: 'function',
+    name: 'remember_fact',
+    description: "Save one short fact about the operator or their business that should be recalled in future conversations, even after the page reloads (e.g. \"I run 400 Kwik Fill sites\", \"our fiscal year starts in July\"). Call this whenever the operator states something worth remembering, even if they didn't explicitly say \"remember\".",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        fact: { type: 'string', description: 'One short, self-contained fact, written so it still makes sense out of context later.' },
+      },
+      required: ['fact'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'forget_fact',
+    description: 'Remove a previously remembered fact that the operator says is wrong, outdated, or should no longer be recalled.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        fact: { type: 'string', description: 'The remembered fact to remove — match it as closely as possible to how it was stored.' },
+      },
+      required: ['fact'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'regeocode_pending_sites',
+    description: "Retry map placement for sites already saved in the operator's portfolio (they count toward get_portfolio_health / get_view_health) but still have no coordinates — the sites get_portfolio_health reports under ungeocodedSites. Call this when the operator refers to sites that are already loaded (e.g. \"they're already on my sites list\", \"add them\", \"figure it out\") instead of asking them to re-type a business name you already have on file. Resolves each pending site's existing stored address and places any that succeed on the map.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        latitude: { type: 'number', description: 'Camera latitude to bias an ambiguous address match toward, if known.' },
+        longitude: { type: 'number', description: 'Camera longitude to bias an ambiguous address match toward, if known.' },
+      },
+      required: [],
+    },
+  },
+];
+
+/**
+ * Typed-chat sibling of `openai-realtime-proxy`: a plain request/response tool
+ * -calling endpoint instead of a WebRTC session, for the chat panel
+ * (src/chat/) that gives full tool access without the mic. Reuses
+ * R1_REALTIME_TOOLS as-is (never mutates it) plus the two chat-only memory
+ * tools above.
+ */
+function openAiChatProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/openai/chat', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(obj));
+      };
+
+      if (req.method !== 'POST') {
+        sendJson(405, { error: 'Method not allowed' });
+        return;
+      }
+
+      // Opt-in per-IP throttle (R1_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
+      if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        sendJson(503, { error: 'OPENAI_API_KEY is not set' });
+        return;
+      }
+
+      let messages;
+      try {
+        const body = await readRequestBody(req, 256 * 1024);
+        const parsed = JSON.parse(body || '{}');
+        messages = Array.isArray(parsed.messages) ? parsed.messages : null;
+      } catch (error) {
+        sendJson(400, { error: error?.message || 'Invalid request body' });
+        return;
+      }
+      if (!messages || !messages.length) {
+        sendJson(400, { error: 'messages must be a non-empty array' });
+        return;
+      }
+
+      try {
+        // Model, tools, and upstream URL are server-chosen, never client-supplied
+        // (SECURITY.md: no client-controlled upstream). Only the conversation
+        // itself comes from the request body.
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: process.env.OPENAI_CHAT_MODEL || OPENAI_CHAT_MODEL_DEFAULT,
+            messages,
+            // Chat Completions wants {type, function: {name, description,
+            // parameters}} — R1_REALTIME_TOOLS is in the Realtime session's
+            // flatter {type, name, description, parameters} shape, so this
+            // re-nests it per request rather than reshaping the pinned const.
+            tools: [...R1_REALTIME_TOOLS, ...CHAT_ONLY_TOOLS].map((tool) => ({
+              type: 'function',
+              function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+            })),
+            tool_choice: 'auto',
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          sendJson(response.status || 502, { error: data?.error?.message || 'OpenAI chat request failed' });
+          return;
+        }
+        sendJson(200, { message: data.choices?.[0]?.message || null, error: null });
+      } catch (error) {
+        sendJson(502, { error: error?.message || 'OpenAI chat request failed' });
+      }
+    });
+  }
+
+  return {
+    name: 'openai-chat-proxy',
     configureServer(server) {
       install(server.middlewares);
     },
@@ -5508,6 +5801,168 @@ function googlePlacesContextProxy() {
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(JSON.stringify({ error: error?.message || 'Google Places request failed', places: [] }));
+      }
+    });
+
+    // --- Autocomplete (session-priced) --------------------------------------
+    // As-you-type suggestions billed the CHEAP way: Google prices Autocomplete
+    // + the one Place Details call that follows it as a single bundled
+    // "session" when both share a sessionToken, regardless of how many
+    // keystrokes fired an Autocomplete request in between. The alternative —
+    // re-running /api/google/text-search (a full Text Search call, a much
+    // pricier SKU) on every keystroke — is exactly the "abuse Google Maps"
+    // failure mode to avoid. The client mints one UUID per search session,
+    // sends it on every autocomplete call AND the closing place-details call,
+    // then starts a fresh token for the next search.
+    //
+    // No server-side result cache here (unlike some sibling proxies): Google
+    // Maps Content — places included — "may not be cached, stored, rehosted"
+    // per DATA_SOURCES.md's Google Maps Platform note. A `Cache-Control:
+    // private` response header (like /api/google/text-search) is the
+    // compliant lever — it lets the requesting BROWSER reuse its own
+    // response briefly, with no server-side reuse across requests/sessions.
+    middlewares.use('/api/google/autocomplete', async (req, res) => {
+      if (req.method !== 'GET') {
+        res.statusCode = 405;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Method not allowed', suggestions: [] }));
+        return;
+      }
+      if (!enforceOptInRateLimit(googleRateLimiter(), req, res)) return;
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        res.statusCode = 503;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'GOOGLE_MAPS_API_KEY is not set', suggestions: [] }));
+        return;
+      }
+
+      const requestUrl = new URL(req.url || '', 'http://localhost');
+      const input = String(requestUrl.searchParams.get('input') || '').trim().slice(0, 200);
+      const sessionToken = String(requestUrl.searchParams.get('sessionToken') || '').trim().slice(0, 100);
+      const latitude = Number(requestUrl.searchParams.get('lat'));
+      const longitude = Number(requestUrl.searchParams.get('lon'));
+      // Autocomplete on 0-1 chars is a wasted call — no upstream can return
+      // anything useful yet — so it is rejected here rather than trusted to
+      // client-side debounce/min-length alone.
+      if (input.length < 2 || !sessionToken || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'input (2+ chars), sessionToken, lat and lon are required', suggestions: [] }));
+        return;
+      }
+
+      try {
+        const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': apiKey,
+          },
+          body: JSON.stringify({
+            input,
+            sessionToken,
+            locationBias: {
+              circle: {
+                center: { latitude, longitude },
+                radius: 50_000,
+              },
+            },
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        const suggestions = Array.isArray(data.suggestions) ? data.suggestions
+          .map((s) => {
+            const pred = s.placePrediction;
+            if (!pred?.placeId) return null;
+            return {
+              placeId: pred.placeId,
+              text: pred.text?.text || null,
+              mainText: pred.structuredFormat?.mainText?.text || pred.text?.text || null,
+              secondaryText: pred.structuredFormat?.secondaryText?.text || null,
+              types: Array.isArray(pred.types) ? pred.types.slice(0, 8) : [],
+            };
+          })
+          .filter(Boolean) : [];
+
+        res.statusCode = response.ok ? 200 : response.status;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        if (response.ok) res.setHeader('Cache-Control', 'private, max-age=300');
+        res.end(JSON.stringify({
+          suggestions,
+          error: response.ok ? null : data.error?.message || 'Google Autocomplete request failed',
+        }));
+      } catch (error) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: error?.message || 'Google Autocomplete request failed', suggestions: [] }));
+      }
+    });
+
+    // --- Place Details (closes the Autocomplete session) --------------------
+    // No server-side cache here either, for the same Google Maps Content
+    // reason as Autocomplete above — `Cache-Control: private` only.
+
+    middlewares.use('/api/google/place-details', async (req, res) => {
+      if (req.method !== 'GET') {
+        res.statusCode = 405;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Method not allowed', place: null }));
+        return;
+      }
+      if (!enforceOptInRateLimit(googleRateLimiter(), req, res)) return;
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        res.statusCode = 503;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'GOOGLE_MAPS_API_KEY is not set', place: null }));
+        return;
+      }
+
+      const requestUrl = new URL(req.url || '', 'http://localhost');
+      const placeId = String(requestUrl.searchParams.get('placeId') || '').trim().slice(0, 200);
+      const sessionToken = String(requestUrl.searchParams.get('sessionToken') || '').trim().slice(0, 100);
+      if (!placeId || !/^[\w-]+$/.test(placeId) || !sessionToken) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'placeId and sessionToken are required', place: null }));
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?sessionToken=${encodeURIComponent(sessionToken)}`,
+          {
+            headers: {
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': ['id', 'displayName', 'formattedAddress', 'location'].join(','),
+            },
+          }
+        );
+        const data = await response.json().catch(() => ({}));
+        const place = (response.ok && Number.isFinite(data.location?.latitude))
+          ? {
+              id: data.id || placeId,
+              name: data.displayName?.text || null,
+              address: data.formattedAddress || null,
+              latitude: data.location.latitude,
+              longitude: data.location.longitude,
+            }
+          : null;
+
+        res.statusCode = place ? 200 : (response.ok ? 502 : response.status);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        if (place) res.setHeader('Cache-Control', 'private, max-age=300');
+        res.end(JSON.stringify({
+          place,
+          error: place ? null : (data.error?.message || 'Google Place Details request failed'),
+        }));
+      } catch (error) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: error?.message || 'Google Place Details request failed', place: null }));
       }
     });
   }
@@ -6183,7 +6638,7 @@ const R1_REALTIME_TOOLS = [
   {
     type: 'function',
     name: 'activate_network',
-    description: "The primary R.1 entry point — use this instead of search_business_sites whenever the user wants analysis, not just pins on the map. Say things like 'activate <business>', 'run this for <business>', 'pull up <business>'s network', or 'what should I look at for <business>' trigger it. It searches for the business/brand near the current camera view (same NEARBY-only Google Places search as search_business_sites — not an exhaustive nationwide chain locator), adds every match to the operator's portfolio, computes a ranked dollar-gap queue across the WHOLE portfolio (every site added so far, not just this search), renders that queue in the SITES panel, and flies the camera to the single biggest modeled opportunity. The gap numbers in the result are a PLACEHOLDER model — deterministic but synthetic, not derived from real traffic, POS, or demographic data yet. Always describe them to the user as modeled/illustrative, never as measured or real; if asked how confident the numbers are, say plainly that this is a placeholder pending real data.",
+    description: "Local-area activation: use this when the operator wants analysis of one market or the area in view, not a whole national network (for that, use discover_network). Phrases like 'activate <business> here', 'run this for <business>', or 'what should I look at nearby' trigger it. It searches for the business/brand near the current camera view (NEARBY-only Google Places search — not an exhaustive nationwide chain locator), adds every match to the operator's portfolio, ranks the WHOLE portfolio (every site added so far, not just this search), renders that queue in the SITES panel, and flies the camera to the top-ranked site. Dollar gap is only computed where the operator has supplied actual volumes; otherwise the queue ranks on measured-input demand potential and the gap reads as requires-actuals. Never describe a null gap as a number.",
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -6194,6 +6649,59 @@ const R1_REALTIME_TOOLS = [
       },
       required: ['businessName'],
     },
+  },
+  {
+    type: 'function',
+    name: 'onboard_business',
+    description: "FIRST CALL for a new operator. When someone says 'let's look at the health of my business', 'I run <brand>', or otherwise identifies who they are, call this with the brand name. It resolves the brand to an industry vertical from R.1's ontology, switches the console's industry lens, and enables the layers that vertical actually needs — so the map configures itself for a fuel retailer differently than for an EV charging network. It returns the vertical, the KPIs that matter for it, the layers it turned on, and a `needs` field naming what to ask for next (usually which region or country to sweep). Do NOT guess the operator's store count or region — this call deliberately does not discover sites; follow it with discover_network once the operator names a region.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        businessName: { type: 'string', description: "The operator's brand as they said it, e.g. 'Chevron' or \"Casey's\"." },
+        industryHint: { type: 'string', description: 'Optional extra words the operator used about their industry, to sharpen vertical resolution.' },
+      },
+      required: ['businessName'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'discover_network',
+    description: "Region-wide network discovery — the tool for an operator with hundreds or thousands of sites and no CSV. Sweeps OpenStreetMap across a whole named region (a state, country, or metro) for every site carrying the brand, and adds them all to the portfolio. Requires BOTH a brand and a region: ask the operator which region rather than assuming one. HONESTY REQUIREMENT: the result's `coverage` block says what was actually swept, and OSM is contributor-maintained — the count is a floor on the operator's real footprint, never a verified store list. Say that when you report the number, and never present it as their actual store count. A sweep of a large country takes many seconds and queries many map tiles.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        businessName: { type: 'string', description: "Brand/operator name to sweep for, e.g. 'Chevron'." },
+        region: { type: 'string', description: "Region to sweep, as a place name Nominatim can resolve: 'Texas', 'United States', 'Iowa', 'Spain'." },
+        verticalId: { type: 'string', description: 'Optional industry vertical id from onboard_business, selecting which OSM feature class to search (e.g. fuel-convenience searches fuel stations).' },
+      },
+      required: ['businessName', 'region'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'inspect_chokepoint',
+    description: "Fly the camera to a maritime oil chokepoint, turn on the live AIS vessel layer, and count the tankers currently inside the gate. Use this when the operator asks what is happening to supply, or as the visual leg of a fuel-price risk answer — it is the step that puts real ships on screen behind a price claim. The vessel feed is viewport-scoped, so this call WAITS (up to ~45s) for AIS contacts to actually arrive in the gate before counting; expect it to take a while and do not call it twice. Returns an INSTANTANEOUS count of contacts inside the gate box, not a transit rate: say so. Most AIS contacts carry no ship type, so `unclassifiedInGate` is usually large and the tanker count is a FLOOR, not a total — say that too rather than reporting the number bare. If no contacts ever arrive, status is awaiting-vessel-feed and the count is null — report that as no coverage, NEVER as zero tankers, which is a completely different claim.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        chokepoint: {
+          type: 'string',
+          enum: ['hormuz', 'malacca', 'suez', 'bab'],
+          description: 'Which chokepoint to inspect. Default hormuz.',
+        },
+        flyTo: { type: 'boolean', description: 'Whether to move the camera there. Default true.' },
+        waitMs: { type: 'number', minimum: 0, maximum: 90000, description: 'How long to wait for the vessel feed to cover the gate. Default 45000.' },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'return_to_portfolio',
+    description: "Fly the camera back to frame the operator's whole site portfolio. Use this after taking them somewhere else (a chokepoint, a competitor market, a weather system) to bring the conversation home before discussing individual stores.",
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
   },
   {
     type: 'function',
@@ -6301,6 +6809,198 @@ const R1_REALTIME_TOOLS = [
           description: "Specific heatmap mode to activate."
         },
         enabled: { type: 'boolean', description: "Explicitly enable or disable heatmap visibility." },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_local_news',
+    description: "Get recent local news headlines for the current or a named location — Google News RSS primary, GDELT fallback via /api/regional-brief. Each article carries its source, domain and publish date. Say which source supplied them: Google News RSS is licensed for non-commercial use only, so flag that when it is the source.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        locationQuery: { type: 'string', description: "Optional place or business name to centre the search on. Omit to use the current camera view position." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_full_insight',
+    description: "Run one combined retail-intelligence pass over the active or named business: competitor positions (rendered as pins on the map, same as analyze_competitors), a view/portfolio health rollup (traffic, price position), a fuel price anchor and forecast, a modelled busyness estimate per site (road congestion x time-of-day, never measured footfall), local news for the area, and the top recommended plays. Use this for 'give me the full picture' / 'run a full analysis' / 'full insight' instead of calling the individual tools one at a time.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        brandName: { type: 'string', description: "Primary brand to analyze (defaults to active portfolio brand if omitted)." },
+        competitors: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Optional list of competitor brand names to benchmark against.",
+        },
+        scope: {
+          type: 'string',
+          enum: ['view', 'portfolio'],
+          description: "'view' rolls up only sites in the current camera view; 'portfolio' covers the whole loaded portfolio. Default 'view'.",
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_store_performance',
+    description: "Store-level trading performance from the operator's POS and loyalty stack: sales, transactions, gallons, gross profit, basket, loyalty attach rate, a day-by-day series against the same days in the prior period, a daypart breakdown, and category movement. Use for 'how is this store doing', 'how was this week', 'which days performed', 'what's soft'. Today is reported to-date and the day it is compared against is cut to the same point in the trading day. Name the best and worst day and the softest category; do not read every field aloud.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number. Omit to use the nearest portfolio site to the camera, or the store under the camera when no portfolio is loaded." },
+        period: {
+          type: 'string',
+          enum: ['today', 'week', 'month', 'quarter'],
+          description: "Trading window. Default 'week'.",
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_store_pulse',
+    description: "Live transaction pulse for one store: transactions this hour against what this hour normally does, day-to-date variance, the trailing six hours, and -- when the store is off plan -- a ranked attribution of what is responsible, built from the console's own live weather, traffic and competitor context plus site equipment state. Use for 'are we seeing a dip', 'what's happening right now', 'why are we down'. Always give the variance WITH its leading cause; a variance with no cause sends an operator hunting. If a share of the gap is unexplained, say so rather than implying the causes account for all of it.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number. Omit for the store under the camera." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_member_intelligence',
+    description: "The loyalty file at one store. focus='segments' (default) returns enrolment, active and lapsed counts, identified-transaction share, and every behavioural segment sized and ranked by gross profit contribution. focus='member' returns one enriched member profile: visits, gallons, inside spend, basket, tier, churn probability, reachability and next best action. focus='identity' runs the identity bridge on an anonymous transaction and returns the matched member, the signals that bridged, the confidence, whether it cleared the auto-merge bar, and how much of the anonymous tail the bridge recovers. Segments are behavioural -- frequency, attach, daypart, recency -- never demographic. A match below the auto-merge bar is a review candidate: say 'matched, held for review', never 'we know who that was'.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number." },
+        focus: {
+          type: 'string',
+          enum: ['segments', 'member', 'identity'],
+          description: "What to return. Default 'segments'.",
+        },
+        segmentId: {
+          type: 'string',
+          enum: ['am-fuel-coffee', 'fuel-only', 'inside-locals', 'foodservice-regulars', 'weekend-family', 'nicotine-loyal', 'lapsing-high-value', 'app-native', 'overnight', 'fleet'],
+          description: "With focus='member', which segment to draw the member from.",
+        },
+        memberId: { type: 'string', description: "With focus='member', a specific loyalty ID." },
+        signals: {
+          type: 'array',
+          items: { type: 'string', enum: ['loyalty', 'payment', 'device', 'phone', 'email', 'plate', 'basket-pattern', 'geofence'] },
+          description: "With focus='identity', which signals the transaction carried. Omit to use whatever the transaction actually had.",
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'get_campaign_performance',
+    description: "The loyalty campaign book for one store: every campaign running, with what it has DONE (redemptions, incremental share, margin given away, net gross profit, return on give -- measured) beside what it was FORECAST to do (prorated to days elapsed -- modelled), plus a verdict, a trend, and overlapping campaigns chasing the same segment. Use for 'what campaigns are running', 'which ones are working', 'is the program paying', 'what should I kill'. NEVER blend the measured and forecast columns: 'doing well' is the comparison of the two. A campaign can beat its redemption plan and still lose money when most redemptions were coming anyway -- when the result flags that divergence, lead with it, because it is the most valuable thing in the book.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number." },
+        status: {
+          type: 'string',
+          enum: ['live', 'ended', 'all'],
+          description: "Which campaigns to include. Default 'live'.",
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'recommend_offer',
+    description: "Rank the loyalty offer catalogue against what is actually true at this store right now -- daypart, weather, live transaction variance, competitor price pressure, and the shape of the loyalty file -- and return the top candidates with the conditions that fired them, the segment each targets, the surfaces suited to it, and the prior redemption rate for that mechanic at that site. Use for 'what should I run', 'which offer would resonate', 'we're dipping, what helps'. Recommend ONE and say why in terms of the live condition that fired it. The redemption figure is a modelled expectation from prior runs at this site, never a promise: say 'has run at about X% here' and never 'will lift sales by X%'. This tool does not create or publish anything.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number." },
+        goal: {
+          type: 'string',
+          enum: ['basket-build', 'inside-attach', 'volume-defence', 'winback', 'traffic-drive', 'attach-high-margin', 'frequency-defence'],
+          description: "Bias the ranking toward one objective when the operator names one.",
+        },
+        limit: { type: 'number', minimum: 1, maximum: 5, description: "How many candidates to return. Default 3." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'create_offer',
+    description: "Build a loyalty offer and its creative. Resolves the mechanic (from offerId, or matched from a plain description like 'a 99 cent coffee offer' or 'twenty-two cents off a gallon'), sizes the audience, generates the advertisement for each requested screen -- forecourt canopy, dispenser topper, in-store menu board, mobile app card, register prompt, digital receipt -- and forecasts redemptions with a band. The console DRAWS the artwork on screen, so describe the offer in one sentence and let the operator look at it; do not read the creative copy aloud. This STAGES the offer only. Nothing reaches a customer until deploy_offer is called, and saying it is live would be false.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        storeName: { type: 'string', description: "Which store, by name or store number." },
+        offerId: {
+          type: 'string',
+          enum: ['coffee-99', 'coffee-with-fill', 'cents-off-gallon', 'winback-gallon', 'wash-with-fill', 'pizza-combo', 'breakfast-combo', 'cold-dispensed-79', 'energy-2for5', 'points-3x', 'late-grill-2for3'],
+          description: "A specific catalogue mechanic. Prefer this when the operator names one, or when recommend_offer just returned one.",
+        },
+        description: { type: 'string', description: "Plain description of the offer when no catalogue id is given, e.g. 'free coffee with a fill' or '22 cents off a gallon'. Matched onto the nearest mechanic so the forecast has prior runs behind it." },
+        name: { type: 'string', description: "Optional display name for the offer." },
+        headline: { type: 'string', description: "Optional headline to print on the creative. Keep it short -- the canopy budget is about 22 characters." },
+        valueLabel: { type: 'string', description: "Optional value as it should read on the artwork, e.g. '99c', '$5.99', '22c/GAL'." },
+        segmentId: {
+          type: 'string',
+          enum: ['am-fuel-coffee', 'fuel-only', 'inside-locals', 'foodservice-regulars', 'weekend-family', 'nicotine-loyal', 'lapsing-high-value', 'app-native', 'overnight', 'fleet'],
+          description: "Target one behavioural segment. Omit to target all members.",
+        },
+        surfaces: {
+          type: 'array',
+          items: { type: 'string', enum: ['canopy', 'pump-topper', 'in-store-menu', 'mobile-app', 'register-prompt', 'e-receipt'] },
+          description: "Which screens to build creative for. Omit for the surfaces the mechanic suits.",
+        },
+        durationDays: { type: 'number', minimum: 1, maximum: 30, description: "How long the offer should run. Default 1." },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+      },
+    },
+  },
+  {
+    type: 'function',
+    name: 'deploy_offer',
+    description: "Publish a staged offer to its screens: canopy, dispenser toppers, in-store menu boards, the mobile app card, the register prompt, the digital receipt. Omit offerId to publish the most recently created offer. Confirm the surfaces that went live and the time the slowest one needs. A mobile-app deployment sends a push notification, and a sent push CANNOT be recalled -- say so when one goes out. Only call this when the operator has clearly asked to push it live, go live, launch it, or publish it; building an offer is not a request to publish it.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        offerId: { type: 'string', description: "The staged offer id, e.g. 'OF-391263'. Omit for the most recent one." },
+        surfaces: {
+          type: 'array',
+          items: { type: 'string', enum: ['canopy', 'pump-topper', 'in-store-menu', 'mobile-app', 'register-prompt', 'e-receipt'] },
+          description: "Publish only these surfaces. Omit to publish every surface the offer was built for.",
+        },
+        sendPush: { type: 'boolean', description: "Set false to place the in-app card without sending a push notification. Default true when the mobile app is among the surfaces." },
       },
     },
   },
@@ -7091,6 +7791,9 @@ const _weatherEffectsInFlight = new Map();
 const _weatherEffectsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 45, globalMax: 120 });
 let _nominatimQueue = Promise.resolve();
 let _nominatimLastRequestAt = 0;
+/** Region name -> {name, bbox}. Borders do not move, so entries never expire. */
+const _regionBboxCache = new Map();
+const REGION_BBOX_MAX_CACHE = 200;
 
 export function requiredFiniteQueryNumber(params, key) {
   const value = params.get(key);
@@ -7276,6 +7979,120 @@ async function fetchRegionalWeather(point) {
 /** True when at least one regional source produced usable data. */
 export function regionalBriefHasAnySource({ place, weather, news } = {}) {
   return Boolean(place || weather || (news && news.status !== 'unavailable'));
+}
+
+/**
+ * Forward-geocode a region NAME to its official OSM bounding box.
+ *
+ * The brand-network sweep (src/portfolio/networkDiscovery.js) needs real
+ * bounds for "Texas" or "Spain" before it can tile them into Overpass
+ * queries. Hard-coding a table of region boxes would put approximated
+ * geography in the source; asking Nominatim keeps the extent as published by
+ * OSM. Shares the module-level `_nominatimQueue` with the reverse lookup so
+ * both honour Nominatim's one-request-per-second policy together.
+ *
+ * @param {string} query
+ * @returns {Promise<{name: string, bbox: {south: number, west: number, north: number, east: number}}|null>}
+ */
+function fetchRegionBoundingBox(query) {
+  const task = _nominatimQueue.then(async () => {
+    const waitMs = Math.max(0, 1100 - (Date.now() - _nominatimLastRequestAt));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    _nominatimLastRequestAt = Date.now();
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      q: query,
+      limit: '1',
+      'accept-language': 'en',
+    });
+    const payload = await fetchRegionalJson(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: {
+        'User-Agent': 'R1/0.1 (+https://github.com/aminebuilds/R1-V5)',
+        Referer: 'https://github.com/aminebuilds/R1-V5',
+      },
+    });
+    return normalizeRegionBoundingBox(payload);
+  });
+  _nominatimQueue = task.catch(() => null);
+  return task;
+}
+
+/**
+ * Nominatim returns `boundingbox: [south, north, west, east]` as strings.
+ * @param {unknown} payload
+ * @returns {{name: string, bbox: object}|null}
+ */
+export function normalizeRegionBoundingBox(payload) {
+  const first = Array.isArray(payload) ? payload[0] : null;
+  const box = first?.boundingbox;
+  if (!Array.isArray(box) || box.length !== 4) return null;
+  const [south, north, west, east] = box.map(Number);
+  if (![south, north, west, east].every(Number.isFinite)) return null;
+  if (north <= south || east <= west) return null;
+  return {
+    name: String(first.display_name || first.name || '').trim() || null,
+    bbox: { south, west, north, east },
+  };
+}
+
+function regionGeocodeProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/geocode/region', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') {
+        sendJson(405, { error: 'Method Not Allowed' });
+        return;
+      }
+      if (!_regionalBriefRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+      const url = new URL(req.url || '', 'http://localhost');
+      const query = String(url.searchParams.get('q') || '').trim().slice(0, 120);
+      if (!query) {
+        sendJson(400, { error: 'A region name (q) is required' });
+        return;
+      }
+      const key = query.toLowerCase();
+      const cached = _regionBboxCache.get(key);
+      if (cached) {
+        sendJson(200, { ...cached, cached: true });
+        return;
+      }
+      try {
+        const resolved = await fetchRegionBoundingBox(query);
+        if (!resolved) {
+          sendJson(404, { error: `No region found for "${query}"` });
+          return;
+        }
+        // Region borders do not move; a plain unbounded-age memo is correct
+        // here and keeps a repeated sweep off Nominatim entirely.
+        _regionBboxCache.set(key, resolved);
+        while (_regionBboxCache.size > REGION_BBOX_MAX_CACHE) {
+          const oldest = _regionBboxCache.keys().next().value;
+          if (oldest === undefined) break;
+          _regionBboxCache.delete(oldest);
+        }
+        sendJson(200, { ...resolved, cached: false });
+      } catch (error) {
+        sendJson(503, { error: error?.message || 'Region lookup is temporarily unavailable' });
+      }
+    });
+  }
+
+  return {
+    name: 'region-geocode-proxy',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
 }
 
 function regionalBriefProxy() {
@@ -7632,6 +8449,465 @@ function eiaProxy() {
     name: 'eia-proxy',
     configureServer(server) { install(server.middlewares); },
     configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+// ── GDELT disruption timeline ───────────────────────────────────────────────
+//
+// The disruption index (src/portfolio/disruptionIndex.js) needs a real time
+// SERIES of event volume and tone for a fixed chokepoint query, not the
+// handful of recent headlines /api/regional-brief returns. GDELT's DOC 2.0
+// API has exactly that, keyless, via its `timelinevol`/`timelinetone` modes —
+// this is a second, differently-shaped view onto the same free source.
+
+const CHOKEPOINT_QUERIES = Object.freeze({
+  hormuz: '(Hormuz OR "Persian Gulf" tanker) (attack OR seizure OR blockade OR sanctions OR strike OR disruption)',
+  malacca: '"Strait of Malacca" (piracy OR disruption OR blockade OR attack OR collision)',
+  suez: '("Suez Canal" OR "Red Sea" shipping) (attack OR houthi OR blockade OR disruption OR strike)',
+  bab: '("Bab el-Mandeb" OR "Red Sea" shipping) (houthi OR attack OR strike OR blockade)',
+});
+
+const GDELT_TIMELINE_CACHE_MS = 6 * 60 * 60_000;
+const GDELT_TIMELINE_MAX_CACHE = 20;
+const _gdeltTimelineCache = new Map();
+const _gdeltTimelineInFlight = new Map();
+const _gdeltTimelineRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 90 });
+
+function trimGdeltTimelineCache() {
+  while (_gdeltTimelineCache.size > GDELT_TIMELINE_MAX_CACHE) {
+    const oldest = _gdeltTimelineCache.keys().next().value;
+    if (oldest === undefined) break;
+    _gdeltTimelineCache.delete(oldest);
+  }
+}
+
+/** Parse one GDELT timeline series (`timelinevol`/`timelinetone` shape) into `{current, history}`. */
+function parseGdeltTimeline(payload) {
+  const series = Array.isArray(payload?.timeline) ? payload.timeline[0] : null;
+  const points = Array.isArray(series?.data) ? series.data : [];
+  const values = points.map((p) => Number(p?.value)).filter((v) => Number.isFinite(v));
+  if (values.length === 0) return { current: null, history: [] };
+  return { current: values[values.length - 1], history: values.slice(0, -1) };
+}
+
+// GDELT's own posted limit is one request per 5 seconds per client, checked
+// live: a burst (this route's own volume+tone pair, or overlap with the
+// regional-brief GDELT fallback below) gets a 429. One shared queue serialises
+// every GDELT call this server makes, the same pattern already used for
+// Nominatim just above.
+let _gdeltQueue = Promise.resolve();
+let _gdeltLastRequestAt = 0;
+
+/** One queued GDELT DOC call (shared 5.5 s spacing), returning the raw payload. */
+async function fetchGdeltPayload(query, mode, timespan) {
+  const task = _gdeltQueue.then(async () => {
+    const waitMs = Math.max(0, 5500 - (Date.now() - _gdeltLastRequestAt));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    _gdeltLastRequestAt = Date.now();
+    const params = new URLSearchParams({ query, mode, format: 'json', timespan });
+    return fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
+      headers: { 'User-Agent': 'R1/0.1' },
+      timeoutMs: 15000,
+    });
+  });
+  _gdeltQueue = task.catch(() => null);
+  return task;
+}
+
+async function fetchGdeltTimeline(query, mode) {
+  return parseGdeltTimeline(await fetchGdeltPayload(query, mode, '90days'));
+}
+
+// The time slider's chokepoint lane: the same query, eight days, with every
+// point's date kept (src/timeline/gdeltSeries.js). An hour of cache — the
+// series' last point moves, the rest does not.
+const GDELT_SERIES_CACHE_MS = 60 * 60_000;
+const _gdeltSeriesCache = new Map();
+const _gdeltSeriesInFlight = new Map();
+
+function gdeltTimelineProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/gdelt/timeline', async (req, res) => {
+      const sendJson = (status, obj, cacheState) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': status === 200 ? 'public, max-age=1800' : 'no-store',
+          ...(cacheState ? { 'X-GDELT-Timeline-Cache': cacheState } : {}),
+        });
+        res.end(JSON.stringify(obj));
+      };
+
+      if (req.method !== 'GET') {
+        sendJson(405, { error: 'Method Not Allowed' });
+        return;
+      }
+      if (!_gdeltTimelineRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+
+      const url = new URL(req.url || '', 'http://localhost');
+      const gate = String(url.searchParams.get('gate') || '').trim().toLowerCase();
+      const query = CHOKEPOINT_QUERIES[gate];
+      if (!query) {
+        sendJson(400, { error: 'Unknown gate', allowed: Object.keys(CHOKEPOINT_QUERIES) });
+        return;
+      }
+
+      const now = Date.now();
+      const cached = _gdeltTimelineCache.get(gate);
+      if (cached && now - cached.cachedAt <= GDELT_TIMELINE_CACHE_MS) {
+        sendJson(200, cached.payload, 'HIT');
+        return;
+      }
+
+      const request = coalesceProxyRequest(_gdeltTimelineInFlight, gate, async () => {
+        const [volume, tone] = await Promise.all([
+          fetchGdeltTimeline(query, 'timelinevol'),
+          fetchGdeltTimeline(query, 'timelinetone'),
+        ]);
+        const payload = {
+          status: 'ready',
+          gate,
+          query,
+          volume,
+          tone,
+          retrievedAt: new Date().toISOString(),
+          attribution: 'GDELT Project (api.gdeltproject.org)',
+        };
+        _gdeltTimelineCache.set(gate, { payload, cachedAt: Date.now() });
+        trimGdeltTimelineCache();
+        return payload;
+      });
+
+      try {
+        const payload = await request.promise;
+        sendJson(200, payload, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        if (cached) {
+          sendJson(200, { ...cached.payload, status: 'stale' }, 'STALE');
+          return;
+        }
+        console.error('[GDELT Timeline Proxy]', error?.message || error);
+        sendJson(502, { status: 'error', error: 'GDELT timeline unavailable' });
+      }
+    });
+
+    middlewares.use('/api/gdelt/series', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') {
+        sendJson(405, { error: 'Method Not Allowed' });
+        return;
+      }
+      if (!_gdeltTimelineRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+      const url = new URL(req.url || '', 'http://localhost');
+      const gate = String(url.searchParams.get('gate') || '').trim().toLowerCase();
+      const query = CHOKEPOINT_QUERIES[gate];
+      if (!query) {
+        sendJson(400, { error: 'Unknown gate', allowed: Object.keys(CHOKEPOINT_QUERIES) });
+        return;
+      }
+      const cached = _gdeltSeriesCache.get(gate);
+      if (cached && Date.now() - cached.cachedAt <= GDELT_SERIES_CACHE_MS) {
+        sendJson(200, cached.payload);
+        return;
+      }
+      const request = coalesceProxyRequest(_gdeltSeriesInFlight, gate, async () => {
+        const raw = await fetchGdeltPayload(query, 'timelinevol', '8days');
+        // A 429 or error page parses to something with no `timeline` at all.
+        // That is "could not fetch", never "no coverage" — throw so the strip
+        // says UNAVAILABLE instead of NO DATA, and nothing is cached.
+        if (!Array.isArray(raw?.timeline)) throw new Error('GDELT answered without a timeline');
+        const points = parseGdeltSeries(raw);
+        const payload = {
+          status: points.length ? 'ready' : 'empty',
+          gate,
+          query,
+          points,
+          unit: 'percent of monitored news coverage',
+          provenance: 'measured',
+          retrievedAt: new Date().toISOString(),
+          attribution: 'GDELT Project (api.gdeltproject.org)',
+        };
+        _gdeltSeriesCache.set(gate, { payload, cachedAt: Date.now() });
+        return payload;
+      });
+      try {
+        sendJson(200, await request.promise);
+      } catch (error) {
+        if (cached) {
+          sendJson(200, { ...cached.payload, status: 'stale' });
+          return;
+        }
+        // 200 with an explicit status: an upstream rate limit is an expected
+        // state of this feed, not a broken request, and the strip shows it.
+        console.warn('[GDELT Series Proxy]', error?.message || error);
+        sendJson(200, { status: 'unavailable', gate, error: 'GDELT series unavailable', points: [] });
+      }
+    });
+  }
+
+  return {
+    name: 'gdelt-timeline-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+// ── Chokepoint tanker-count history ─────────────────────────────────────────
+//
+// AIS gives a live SNAPSHOT of vessels in a gate, never a history — there is
+// no free source for past transit counts. So this proxy is the app building
+// its own real history, one measured snapshot at a time, every time a client
+// actually counts tankers in a gate. It starts empty and stays that way —
+// `computeDisruptionIndex` reports `transits` as `missing` until there are at
+// least two real points — rather than backfilling anything invented.
+
+const DISRUPTION_HISTORY_DIR = path.join(process.cwd(), '.r1-cache', 'disruption');
+const DISRUPTION_SNAPSHOT_MIN_GAP_MS = 5 * 60_000;
+const DISRUPTION_HISTORY_MAX_POINTS = 500;
+const _disruptionHistoryMem = new Map();
+const _disruptionHistoryRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 200 });
+
+function disruptionHistoryPath(gate) {
+  return path.join(DISRUPTION_HISTORY_DIR, `${gate}.json`);
+}
+
+async function readDisruptionHistory(gate) {
+  if (_disruptionHistoryMem.has(gate)) return _disruptionHistoryMem.get(gate);
+  let entries = [];
+  try {
+    const parsed = JSON.parse(await fsp.readFile(disruptionHistoryPath(gate), 'utf8'));
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch { /* no history yet */ }
+  _disruptionHistoryMem.set(gate, entries);
+  return entries;
+}
+
+async function appendDisruptionSnapshot(gate, snapshot) {
+  const entries = await readDisruptionHistory(gate);
+  const last = entries[entries.length - 1];
+  if (last && Date.now() - last.ts < DISRUPTION_SNAPSHOT_MIN_GAP_MS) {
+    return entries; // Too soon since the last real snapshot — not appended.
+  }
+  const next = [...entries, { ts: Date.now(), ...snapshot }].slice(-DISRUPTION_HISTORY_MAX_POINTS);
+  _disruptionHistoryMem.set(gate, next);
+  try {
+    await fsp.mkdir(DISRUPTION_HISTORY_DIR, { recursive: true });
+    await fsp.writeFile(disruptionHistoryPath(gate), JSON.stringify(next), 'utf8');
+  } catch (err) {
+    console.warn('[disruption-history] write failed:', err?.message || err);
+  }
+  return next;
+}
+
+function disruptionHistoryProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/disruption-history', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(obj));
+      };
+      if (!_disruptionHistoryRateLimiter(clientKey(req))) {
+        sendJson(429, { error: 'Rate limit exceeded' });
+        return;
+      }
+
+      const url = new URL(req.url || '', 'http://localhost');
+
+      if (req.method === 'GET') {
+        const gate = String(url.searchParams.get('gate') || '').trim().toLowerCase();
+        if (!CHOKEPOINT_QUERIES[gate]) {
+          sendJson(400, { error: 'Unknown gate', allowed: Object.keys(CHOKEPOINT_QUERIES) });
+          return;
+        }
+        const entries = await readDisruptionHistory(gate);
+        sendJson(200, { gate, points: entries });
+        return;
+      }
+
+      if (req.method === 'POST') {
+        try {
+          const body = await readRequestBody(req, 4 * 1024);
+          const record = JSON.parse(body || '{}');
+          const gate = String(record.gate || '').trim().toLowerCase();
+          if (!CHOKEPOINT_QUERIES[gate]) {
+            sendJson(400, { error: 'Unknown gate', allowed: Object.keys(CHOKEPOINT_QUERIES) });
+            return;
+          }
+          const tankerCount = Number(record.tankerCount);
+          const vesselsInGate = Number(record.vesselsInGate);
+          const unclassified = Number(record.unclassified);
+          if (!Number.isFinite(tankerCount) || !Number.isFinite(vesselsInGate)) {
+            sendJson(400, { error: 'tankerCount and vesselsInGate must be numbers' });
+            return;
+          }
+          const entries = await appendDisruptionSnapshot(gate, {
+            tankerCount,
+            vesselsInGate,
+            unclassified: Number.isFinite(unclassified) ? unclassified : null,
+          });
+          sendJson(200, { gate, points: entries });
+        } catch (error) {
+          sendJson(400, { error: error?.message || 'invalid request body' });
+        }
+        return;
+      }
+
+      sendJson(405, { error: 'Method Not Allowed' });
+    });
+  }
+
+  return {
+    name: 'disruption-history-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+// ── US airspace brief ───────────────────────────────────────────────────────
+//
+// `/api/airspace/brief` — FAA NAS status, a persisted timeline of US airborne
+// counts, the OpenSky flight-table departure study for the active event, and
+// event headlines. The logic lives in src/airspace/airspaceService.js; this
+// block only supplies the fixed upstreams, the OpenSky token and the shared
+// proxy cache. No upstream URL is client-influenced.
+
+const _airspaceRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 120 });
+const AIRSPACE_FAA_STATUS_URL = 'https://nasstatus.faa.gov/api/airport-status-information';
+const AIRSPACE_MAX_FLIGHT_TABLE_BYTES = 8 * 1024 * 1024;
+const AIRSPACE_MAX_STATES_BYTES = 12 * 1024 * 1024;
+
+/** Minutes between self-fetched OpenSky samples; 0 = only reuse the proxy cache. */
+function airspaceSampleEveryMs() {
+  const raw = process.env.R1_AIRSPACE_SAMPLE_MIN;
+  const minutes = raw === undefined || raw === '' ? 10 : Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  return Math.max(5, Math.min(120, minutes)) * 60_000;
+}
+
+/** A JSON file under .r1-cache, read/written whole. */
+function airspaceJsonFile(name) {
+  const file = path.join(process.cwd(), '.r1-cache', name);
+  return {
+    async read() {
+      try { return JSON.parse(await fsp.readFile(file, 'utf8')); } catch { return null; }
+    },
+    async write(data) {
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      await fsp.writeFile(file, JSON.stringify(data), 'utf8');
+    },
+  };
+}
+
+/** GET an OpenSky REST path with the server's token. 404 means "no rows". */
+async function airspaceOpenSkyGet(pathAndQuery, maxBytes) {
+  const token = await getOpenSkyToken();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(`https://opensky-network.org/api${pathAndQuery}`, {
+      signal: controller.signal,
+      headers: token ? { Authorization: `Bearer ${token}`, Accept: 'application/json' } : { Accept: 'application/json' },
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`OpenSky returned ${response.status}`);
+    return readResponseTextCapped(response, maxBytes);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Event headlines: GDELT first (commercial use permitted), Google News RSS as fallback. */
+async function airspaceHeadlines(query) {
+  const params = new URLSearchParams({
+    query: `${query.gdelt} sourcelang:english`,
+    mode: 'artlist',
+    format: 'json',
+    maxrecords: '10',
+    sort: 'datedesc',
+    timespan: '72h',
+  });
+  try {
+    const payload = await fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
+      headers: { 'User-Agent': 'R1/0.1' },
+      timeoutMs: 8_000,
+    });
+    const items = normalizeRegionalArticles(payload, 5);
+    if (items.length) return { source: 'GDELT', items };
+  } catch { /* fall through to RSS */ }
+  const rss = new URLSearchParams({ q: `${query.rss} when:3d`, hl: 'en-US', gl: 'US', ceid: 'US:en' });
+  const xml = await fetchRegionalText(`https://news.google.com/rss/search?${rss}`, {
+    headers: { 'User-Agent': 'R1/0.1' },
+    timeoutMs: 12_000,
+  });
+  return { source: 'Google News RSS', items: normalizeRssArticles(xml, 5) };
+}
+
+function airspaceProxy() {
+  const service = createAirspaceService({
+    timelineStore: airspaceJsonFile('airspace-timeline.json'),
+    departuresStore: {
+      // Event ids come from the static record in src/airspace/events.js.
+      read: (id) => airspaceJsonFile(`airspace-departures-${String(id).replace(/[^a-z0-9-]/gi, '')}.json`).read(),
+      write: (id, data) => airspaceJsonFile(`airspace-departures-${String(id).replace(/[^a-z0-9-]/gi, '')}.json`).write(data),
+    },
+    readOpenSkyCache: () => ({
+      body: _openskyCacheBody && !openSkySourceIsStale(_openskyCacheSourceEpochMs, Date.now()) ? _openskyCacheBody : null,
+      at: _openskyCacheTime,
+    }),
+    openSkyCoolingDown: () => Date.now() < _openskyCooldownUntil,
+    fetchOpenSkyStates: () => airspaceOpenSkyGet('/states/all', AIRSPACE_MAX_STATES_BYTES),
+    fetchOpenSkyFlights: async (begin, end) => {
+      const text = await airspaceOpenSkyGet(`/flights/all?begin=${Number(begin)}&end=${Number(end)}`, AIRSPACE_MAX_FLIGHT_TABLE_BYTES);
+      return text ? JSON.parse(text) : [];
+    },
+    fetchNasXml: () => fetchRegionalText(AIRSPACE_FAA_STATUS_URL, {
+      headers: { 'User-Agent': 'R1/0.1', Accept: 'application/xml' },
+      timeoutMs: 12_000,
+      maxBytes: 512 * 1024,
+    }),
+    fetchHeadlines: airspaceHeadlines,
+    options: { sampleEveryMs: airspaceSampleEveryMs() },
+  });
+
+  function install(middlewares) {
+    middlewares.use('/api/airspace/brief', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') { sendJson(405, { error: 'Method Not Allowed' }); return; }
+      if (!_airspaceRateLimiter(clientKey(req))) { sendJson(429, { error: 'Rate limit exceeded' }); return; }
+      try {
+        sendJson(200, await service.getBrief());
+      } catch (error) {
+        console.warn('[airspace] brief failed:', error?.message || error);
+        sendJson(502, { ok: false, error: 'Airspace brief unavailable' });
+      }
+    });
+  }
+
+  function attach(server) {
+    install(server.middlewares);
+    service.start();
+    server.httpServer?.once?.('close', () => service.stop());
+  }
+
+  return {
+    name: 'airspace-brief-proxy',
+    configureServer: attach,
+    configurePreviewServer: attach,
   };
 }
 
@@ -8016,6 +9292,7 @@ export default defineConfig(({ mode }) => {
       adsbdbProxy(),
       overpassProxy(),
       militaryInstallationsProxy(),
+      regionGeocodeProxy(),
       regionalBriefProxy(),
       weatherEffectsProxy(),
       cctvProxy(),
@@ -8025,9 +9302,13 @@ export default defineConfig(({ mode }) => {
       aisLiveProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
+      openAiChatProxy(),
       googlePlacesContextProxy(),
       eiaProxy(),
       fuelPriceProxy(),
+      gdeltTimelineProxy(),
+      disruptionHistoryProxy(),
+      airspaceProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',

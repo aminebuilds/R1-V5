@@ -1462,7 +1462,10 @@ test('production eviction sites actually tag their clears', () => {
   // whose registration sweep deletes the record the clear needs to see.
   const firmsSource = fs.readFileSync(new URL('./firmsHeatmap.js', import.meta.url), 'utf8');
   const evictedClear = firmsSource.indexOf('clearSelectedEntityContextForLayer(id, { evicted: true });');
-  const lodRebuild = firmsSource.indexOf('renderCurrentLod(true);\n      if (reselected) selectFire(reselected);');
+  // The settle-then-rebuild now lives in applyFireSet(), shared by the live
+  // refresh and the time slider's historical windows; match it by shape, not
+  // by indentation.
+  const lodRebuild = firmsSource.search(/renderCurrentLod\(true\);\s*\n\s*if \(reselected\) selectFire\(reselected\);/);
   assert.ok(evictedClear > 0, 'FIRMS must mark a refresh-vanished selection as an eviction');
   assert.ok(lodRebuild > 0, 'the FIRMS refresh must settle its selection before rebuilding');
   assert.ok(

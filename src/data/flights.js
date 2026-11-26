@@ -4186,7 +4186,28 @@ const flightsLayer = {
       // Keep military classification fresh while the military layer is off
       refreshMilitaryRegistryIfStale();
 
+      // Time-slice the per-aircraft pass: a worldwide OpenSky snapshot runs
+      // ~10-16k rows, and processing them synchronously in one pass blocked
+      // the main thread for 1-6s per poll (measured 2026-09-07 with
+      // flights+traffic+ais-vessels active) — the render loop simply
+      // couldn't paint until the whole loop finished. Yielding to the event
+      // loop every CHUNK_YIELD_INTERVAL aircraft keeps every task short
+      // enough to paint between; setTimeout (not requestAnimationFrame) is
+      // deliberate — rAF is throttled/paused on a hidden tab (this app
+      // suspends the render loop when backgrounded), which would stall a
+      // poll indefinitely instead of just taking longer. The full poll takes
+      // longer wall-clock to finish either way, which is fine since polls
+      // are 9s+ apart and nothing here needs same-tick consistency across
+      // aircraft.
+      const CHUNK_YIELD_INTERVAL = 250;
+      let _sinceYield = 0;
       for (const state of usableStates) {
+        if (_sinceYield >= CHUNK_YIELD_INTERVAL) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          updateSignal.throwIfAborted();
+          _sinceYield = 0;
+        }
+        _sinceYield++;
         const [rawIcao24, callsign, origin_country, time_position, last_contact, lon, lat, baro_alt, on_ground, velocity, true_track, , , geo_alt] = state;
         const icao24 = _normalizeTrackedIcao(rawIcao24);
         const category = Number.isFinite(state[17]) ? state[17] : null; // extended=1 emitter category

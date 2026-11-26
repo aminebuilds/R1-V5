@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>R.1 — Commercial Intelligence</title>
+  <title>PAR Intelligence R1</title>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -27,7 +27,7 @@
     <div class="title-glow"></div>
     <h1><span class="title-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /></span> <span>R.<span class="title-accent">1</span></span></h1>
     <div class="title-meta-row">
-      <p class="subtitle" id="masthead-subtitle">COMMERCIAL INTELLIGENCE</p>
+      <p class="subtitle" id="masthead-subtitle">PAR INTELLIGENCE R1</p>
       <div id="industry-lens-container" class="industry-lens-container">
         <label for="industry-lens-select" class="industry-lens-label">LENS:</label>
         <select id="industry-lens-select" class="industry-lens-select" aria-label="Select commercial industry lens">
@@ -59,6 +59,9 @@
   <nav id="top-center-actions" aria-label="Globe actions">
     <button id="clear-selected-layers" type="button" aria-label="Clear selected data layers" title="Turn off all selected data layers">
       <span class="material-symbols-outlined" aria-hidden="true">layers_clear</span>
+    </button>
+    <button id="time-slider-toggle" type="button" aria-label="Open time slider" aria-pressed="false" title="Time slider: scrub the last 7 days of fires, earthquakes and chokepoint news">
+      <span class="material-symbols-outlined" aria-hidden="true">history</span>
     </button>
     <button id="share-btn" type="button" aria-label="Copy share link" title="Copy share link">
       <span class="share-icon" aria-hidden="true">&#x1F517;</span>
@@ -449,22 +452,6 @@
       </div>
     </div>
     <div class="pp-toggle-group">
-      <button class="pp-toggle-btn active" id="scope-toggle" title="Scope — the circular viewport mask" aria-pressed="true">
-        <span class="pp-icon material-symbols-outlined" aria-hidden="true">adjust</span>
-        <span class="pp-label">Scope</span>
-      </button>
-      <div class="pp-slider-row visible" id="scope-slider-row">
-        <span class="pp-slider-mini-label">Feather</span>
-        <!-- Feather starts at an 11% soft scope-mask edge (final value
-             2026-08-24, superseding the 08-22 hard-crop and 08-23 8% rulings);
-             mirrors SCOPE_FEATHER_RATIO_DEFAULT in src/scopeMask.js. Feather
-             softens the black mask edge; label fading is the separate Fade
-             slider. -->
-        <input type="range" class="pp-slider" id="scope-feather-slider" min="0" max="100" value="11" title="Scope edge feather as a percentage of the keyhole radius" />
-        <span class="pp-slider-value" id="scope-feather-value">11%</span>
-      </div>
-    </div>
-    <div class="pp-toggle-group">
       <button class="pp-toggle-btn" id="celestial-toggle" title="Celestial ring — reveal the full globe" aria-pressed="false">
         <span class="pp-icon material-symbols-outlined" aria-hidden="true">flare</span>
         <span class="pp-label">Celestial</span>
@@ -756,6 +743,31 @@
     </div>
   </div>
 
+  <!--
+    Typed chat (src/chat/): a keyboard front door with the same tool access as
+    voice, so the mic is never the only way in. Deliberately separate from the
+    Explain Board (src/explain/board.js) — that board draws single composed
+    answer cards for a fixed set of actions; this is a running conversation
+    with free-form tool calls and its own local memory.
+  -->
+  <div id="chat-panel" class="panel-collapsible collapsed" data-panel-id="chat-panel">
+    <div class="chat-panel-inner">
+      <div class="panel-header">
+        <span class="panel-title">CHAT</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="chat-panel" title="Collapse panel">+</button>
+      </div>
+      <div id="chat-transcript" class="chat-transcript">
+        <div id="chat-empty" class="chat-empty">Ask anything — camera, layers, CCTV/radio, or the business-intelligence engines. Type /help for the full list, or /memory to see what's been remembered.</div>
+      </div>
+      <form id="chat-ask" class="scene-controls chat-ask">
+        <input type="text" id="chat-ask-input" class="sites-text-input" placeholder="Ask or type /help..." aria-label="Type a message to R.1" autocomplete="off" />
+        <button id="chat-ask-submit" class="scene-btn" type="submit">SEND</button>
+      </form>
+      <div id="chat-status" class="chat-status" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
   </div>
 
   <!-- Global Context is deliberately independent from the left layer accordion. -->
@@ -907,7 +919,7 @@
   <!-- Explicit vertical onboarding on a fresh session. -->
   <aside id="first-run-launcher" role="dialog" aria-labelledby="first-run-title" aria-describedby="first-run-description" hidden>
     <header class="first-run-header">
-      <span class="first-run-kicker">R.1 · Commercial Intelligence</span>
+      <span class="first-run-kicker">PAR Intelligence R1</span>
     </header>
     <h2 id="first-run-title">Explore commercial networks</h2>
     <p id="first-run-description">Search companies, infrastructure footprints, or supply chains across global markets.</p>
@@ -920,7 +932,7 @@
     </div>
 
     <div class="first-run-intent-pills" role="toolbar" aria-label="Suggested searches">
-      <button type="button" class="first-run-pill" data-intent-sample="Casey's stores in Iowa along I-80">Fuel &amp; Retail</button>
+      <button type="button" class="first-run-pill" data-intent-sample="Gas stations along I-80 in Iowa">Fuel &amp; Retail</button>
       <button type="button" class="first-run-pill" data-intent-sample="Tesla Superchargers along I-5 corridor">EV Mobility</button>
       <button type="button" class="first-run-pill" data-intent-sample="Hyperscale datacenters in Northern Virginia">Cloud Infrastructure</button>
       <button type="button" class="first-run-pill" data-intent-sample="Maersk container vessels entering Rotterdam port">Maritime Logistics</button>
@@ -990,6 +1002,11 @@
         aria-label="Ask a question about this view" />
       <button id="explain-ask-submit" class="xp-ask-btn" type="submit">Ask</button>
     </form>
+    <div class="xp-briefs" role="group" aria-label="Standing briefs">
+      <span class="xp-briefs-label">Briefs</span>
+      <button id="explain-brief-airspace" class="xp-brief-btn" type="button"
+        title="FAA programs, US airborne traffic over time, and the latest coverage — also opens with ?airspace">US airspace</button>
+    </div>
     <div id="explain-steps" class="xp-steps" role="status" aria-live="polite" hidden></div>
     <div id="explain-body" class="xp-body" data-status="idle"></div>
   </aside>
@@ -1002,7 +1019,7 @@
     <div class="loader-content">
       <span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /></span>
       <h2>R.<span class="title-accent">1</span></h2>
-      <p class="loader-status">Initializing commercial intelligence platform...</p>
+      <p class="loader-status">Initializing PAR Intelligence R1...</p>
     </div>
   </div>
 

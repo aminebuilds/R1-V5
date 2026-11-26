@@ -21,6 +21,19 @@ The golden rule: **secret-bearing API keys stay on the server side.** The dev/pr
 | `AISSTREAM_API_KEY` | Server only | Server holds the AISStream websocket; browser polls the same-origin `/api/ais-live` cache |
 | OpenSky OAuth (`OPENSKY_CLIENT_ID/SECRET`) | Server only | Server mints + refreshes the token behind `/api/opensky` |
 
+> **Removed:** `PAR_INTELLIGENCE_MCP_URL` / `PAR_INTELLIGENCE_MCP_API_KEY`.
+> The Realtime session used to append an `mcp`-type tool pointed at an
+> external POS/loyalty server, with the bearer token handed to OpenAI so its
+> infrastructure could call that server directly on the operator's behalf.
+> That route no longer exists. Store performance, loyalty, member and offer
+> capability is served in-process by `src/storeAgent/` through ordinary
+> function tools, which means no third party is given a credential, no
+> outbound connection is made on the operator's behalf, and the tool surface
+> is covered by the two schema pins in `src/firstRunExperience.test.mjs` and
+> `src/radioMarkup.test.mjs`. If a real operator stack is wired up later,
+> keep that property: proxy it through this server's own middleware with the
+> key held server-side, the way every other feed here works.
+
 ### Two deliberately client-side keys — restrict them
 
 These are designed to be used directly in the browser (like a Mapbox public token). They are injected into the client bundle via Vite's `define`, so they **will** be visible in browser devtools. Scope and restrict them rather than trying to hide them:

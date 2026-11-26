@@ -47,10 +47,15 @@ prices on the map. The supported US paths are the EIA regional anchor above
 | **GBFS (Lyft / BCycle)** | Bikeshare availability | Per-feed (attribution-only) | Credit the operator (e.g. Austin BCycle) + its `license_url` |
 | **Radio Browser** | Geolocated internet-radio station directory and station-level tags | Public-domain directory data under PDDL 1.0; individual broadcaster stream terms apply | "Radio Browser" plus a link to the selected broadcaster |
 | **Re:Earth Terrain** (Mapterhorn) | Terrain (keyless globe stacks — OSM etc. — + `/api/terrain/heights` ellipsoidal-height lookups) | Terrain mesh: CC BY 4.0; geoid: EGM2008 (NGA, public domain) | "Terrain (keyless globe stacks): Re:Earth Terrain / Mapterhorn (CC BY 4.0) / EGM2008 (NGA)" |
+| **FAA NAS Status** (ATCSCC airport status feed, `nasstatus.faa.gov/api/airport-status-information`) | Ground stops, ground delay programs, airport delays and closures on the US airspace brief (keyless) | US Government work, public domain | "FAA NAS Status (nasstatus.faa.gov)" |
+| **OpenSky Network** — `flights/all` table | Departure-by-half-hour study for an airspace event on the US airspace brief (authenticated; ~30 API credits per two-hour window) | Same OpenSky non-commercial terms as the live-flight snapshot | Same as OpenSky above |
+| **Google News RSS / GDELT DOC 2.0** — airspace query | Linked event headlines on the US airspace brief | Same terms as the regional-news rows above: GDELT permits commercial use with citation; Google News RSS is personal/non-commercial only | "GDELT Project" or "Google News RSS", plus each article's linked publisher |
+| **USGS ComCat FDSN event query** (`earthquake.usgs.gov/fdsnws/event/1/query`) | Eight days of M2.5+ earthquakes behind the time slider (fetched in the browser, keyless) | U.S. public domain, same as the USGS row above | "Data courtesy of the U.S. Geological Survey" |
+| **GDELT DOC 2.0** — `timelinevol` per oil chokepoint (`/api/gdelt/series`) | The time slider's chokepoint lanes: eight days of news-coverage share for Hormuz, Malacca, Suez and Bab el-Mandeb, using the same queries as the disruption index | Same GDELT terms as above: commercial use permitted with citation | "GDELT Project" |
 
 ### Notes on the live sources
 
-- **Google Maps Platform.** You supply your own API key and are bound by [Google's ToS](https://cloud.google.com/maps-platform/terms). Google Maps Content (tiles, geocodes, places) **may not be cached, stored, rehosted, or committed** — this app only ever uses it live, which is the compliant pattern. The "Google" attribution is displayed on the globe and must stay visible. Restrict your key (see [SECURITY.md](SECURITY.md)).
+- **Google Maps Platform.** You supply your own API key and are bound by [Google's ToS](https://cloud.google.com/maps-platform/terms). Google Maps Content (tiles, geocodes, places) **may not be cached, stored, rehosted, or committed** — this app only ever uses it live, which is the compliant pattern. The "Google" attribution is displayed on the globe and must stay visible. Restrict your key (see [SECURITY.md](SECURITY.md)). As-you-type search suggestions (`/api/google/autocomplete`, `/api/google/place-details`) use Places Autocomplete with a client-minted session token, priced by Google as one bundled session per search interaction rather than per keystroke — the cost-conscious lever for a live-typing UI, alongside client-side debouncing and a 2-character minimum. Like the other Places proxies, neither endpoint keeps a server-side result cache; both set `Cache-Control: private` only, which lets the requesting browser reuse its own response briefly without the server storing or rehosting Google's data across requests.
 - **OpenSky Network.** Its license is **non-commercial**, and operational use of the REST API in a live product can require a prior written agreement with OpenSky — even for non-profit/government use. If you deploy this commercially, contact OpenSky for your own terms. The flights layer is a toggle and runs anonymously by default.
 - **adsb.lol flight fallback.** When OpenSky is unavailable and no last-good OpenSky response exists, the server requests a cached, capped 250 nm adsb.lol point snapshot around the current camera subpoint. This is regional observed context, not worldwide completeness; provenance is exposed in the Flights stats/context row. Military ICAOs remain reconciled through the existing dedicated military registry rather than duplicated.
 - **Launch Library 2.** `/api/launches` makes a server-side rolling-30-day query against the supported v2.3 detailed launch endpoint, caches successful responses for 15 minutes in memory and on disk, and serves the last successful response during a throttle or transient outage. Anonymous access is limited to 15 calls/hour; deployments can provide `LL2_API_TOKEN` for authenticated access. The Space Devs' published terms permit using and sharing the API data in any form, ask users not to forward it without adding value, disclaim complete accuracy, and encourage—but do not require—attribution. This app keeps a courtesy credit. Payload and stage/recovery records are shown only when supplied. Failed launches expose their source status and never receive fallback orbit geometry or a live/estimated marker. LL2 supplies launch context and event timing, not continuous ascent telemetry or live orbital state.
@@ -60,6 +65,12 @@ prices on the map. The supported US paths are the EIA regional anchor above
 - **Re:Earth Terrain.** Keyless (no API key). Used two ways: (1) `src/mapStackController.js` swaps in a `Cesium.CesiumTerrainProvider` pointed at Re:Earth's `cesium-mesh/ellipsoid` quantized-mesh endpoint for globe stacks without a Cesium ion token (e.g. OSM), replacing a flat `EllipsoidTerrainProvider`; falls back to the flat provider if the endpoint can't be reached. (2) The server-side `/api/terrain/heights` proxy (disk-cached, serve-stale) resolves per-point ellipsoidal ground height for entity placement. Both are best-effort with a keyless-safe fallback (bundled EGM96 geoid math) if Re:Earth is unreachable.
 - **Global Context installation context.** `/api/military-installations` queries only an allow-listed subset of OSM `military=*` and `landuse=military` features inside a maximum 10° non-dateline viewport. It caches and may serve stale mapped context, but it is neither a global installation database nor evidence of capability, activity, or absence. User-requested Google Places results remain separately sourced candidates unless their returned types explicitly establish military classification; generic offices, museums, and similarly ambiguous matches are excluded from military proximity counts.
 - **Cockpit regional briefing.** `/api/regional-brief` rounds aircraft coordinates into 0.1° cache cells, caches results for five minutes, and serializes Nominatim calls at no more than one request per second. Google News RSS is queried with the resolved locality/region first; GDELT is used only when that RSS query fails or is empty. Google's published Google News terms restrict that source to personal, noncommercial use, so commercial deployments must disable/replace it or obtain separate permission; GDELT permits commercial dataset use with citation. The Data attribution popover identifies the active headline sources; article links retain publisher attribution. Headlines are location-query matches, not verified incidents, risk rankings, or evidence that a location is safe. Empty, partial, stale, and unavailable source states remain distinct. Open-Meteo supplies current conditions independently of the news source. `WX OFF` disables cockpit weather rendering only; the Local Info briefing still fetches its source-backed weather values and displays the required linked Open-Meteo credit.
+- **US airspace brief.** `/api/airspace/brief` combines four feeds, each reported with its own state (`ready`, `stale`, `computing`, `unavailable`) rather than blended:
+  - **FAA NAS Status** is read on demand and cached for 60 s. If it can't be read, the brief says so and never reports "no programs".
+  - **US airborne counts** come from OpenSky `states/all`. The server samples them into `.r1-cache/airspace-timeline.json` (gitignored; up to seven days at ten-minute spacing). A sample reuses the flights proxy's own cached snapshot when it is under three minutes old, which costs no extra credits. Otherwise the server fetches its own snapshot every `R1_AIRSPACE_SAMPLE_MIN` minutes (default 10; `0` turns self-fetching off). It never fetches during a 429 cooldown.
+  - **The departure study** reads OpenSky's `flights/all` table. That table is a sample of global traffic and adds a flight only after it lands, so it is used for the shape of the event day against the day before, never as a total. It is cached per two-hour window; a window that ended more than 24 h ago is never re-fetched.
+  - **Headlines** query GDELT first and fall back to Google News RSS. Google News results carry the non-commercial caveat on the board.
+- **Curated event records** (`src/airspace/events.js`) pin reported facts of an airspace event to the outlet that published them, with the time the record was last checked. They link to articles; they don't copy them (paraphrase, quotes under fifteen words). Facts R.1 measured itself from OpenSky are labelled as such and carry no link.
 - **Dynamic weather presentation.** While cockpit mode is active, `/api/weather-effects` requests current Open-Meteo observations for the aircraft/camera location, rounds coordinates into 0.1° cache cells, caches results for five minutes, and may retain a stale observation for up to 30 minutes during a transient outage. WMO condition code selects the visual family; observed cloud cover, precipitation, visibility, wind speed, and wind direction bound its strength and motion. Missing or expired weather renders no synthetic atmospheric effect, and normal globe view never renders the weather overlay.
 
 ---
@@ -105,6 +116,17 @@ transaction quota. Requires a free `FIRMS_MAP_KEY`
 (https://firms.modaps.eosdis.nasa.gov/api/map_key/); the layer is empty without it.
 The former bundled 2026-05-25 snapshot was removed 2026-07-16.
 
+The time slider adds a **nine-day detection history** under the same key:
+`/api/firms/history` backfills nine UTC days in requests of at most five days
+(FIRMS' `DAY_RANGE` limit, counted forward from `DATE`), keeps one file per day
+in the gitignored `.r1-cache/firms-history/`, and re-fetches a day only until 6 h
+after it ended. Every live refresh also tops up the two open days at no extra
+cost. The first backfill is six world-sized requests (two per source, ~20 MB of
+CSV each). That is well inside the 5,000-transaction / 10-minute quota, though
+FIRMS notes multi-day requests can count as several transactions. Nothing is
+redistributed: the browser downloads the detections from this server, packed
+binary (~14 MB for nine days), only when the slider is opened.
+
 ### Natural Earth physical regions (`natural_earth/`)
 
 Curated from the **Natural Earth 10m physical vectors** (https://www.naturalearthdata.com/ —
@@ -140,6 +162,23 @@ is legally required; we note the source here and in the folder's `SOURCE.md`, wh
 the retrieval date (2026-07-30), exact download URL, license evidence, and the
 deterministic transform (`scripts/build-sf-neighborhoods.mjs`: `nhood` → `name`, ~2 m
 Douglas-Peucker simplification, 6-decimal rounding).
+
+---
+
+## The store agent has no external source
+
+`src/storeAgent/` carries no entry in this file because it reaches no feed.
+Store performance, loyalty, member, campaign and offer figures are generated
+in-process by a deterministic simulation of a PAR-class POS/loyalty stack —
+there is no provider, no licence, and nothing to attribute. It is the
+demonstration substrate for the commercial motion, and
+[`src/storeAgent/storeLedger.js`](src/storeAgent/storeLedger.js)'s header
+states the constraint that goes with that: it must not serve a paying
+operator's console, and its output must not be blended into a rollup that
+also carries measured feeds.
+
+If a real operator stack is ever wired in, it gets an entry here like any
+other source, and the seam is the exports of `src/storeAgent/storeAgent.js`.
 
 ---
 

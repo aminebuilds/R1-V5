@@ -15,7 +15,7 @@
  */
 
 import * as Cesium from 'cesium';
-import { createExplainStream } from './agui.js';
+import { CUSTOM_EVENT, EVENT, createExplainStream } from './agui.js';
 import { onActionResult } from './bus.js';
 import { COMPOSED_ACTIONS, composeForAction, composePending } from './composers.js';
 import { gap, head, withIds } from './blocks.js';
@@ -35,6 +35,17 @@ let _stream = null;
 let _dom = null;
 let _unsubscribeBus = null;
 let _unsubscribeStream = null;
+/** The action the board is currently showing, so a live surface can tell it still owns the board. */
+let _currentAction = null;
+
+/**
+ * The action behind the board on screen, or null when it is closed.
+ * @returns {string|null}
+ */
+export function currentExplainAction() {
+  if (!_dom?.board || _dom.board.hidden) return null;
+  return _currentAction;
+}
 
 function byId(id) {
   return document.getElementById(id);
@@ -170,11 +181,45 @@ export function explainResult(action, result, meta = {}) {
   if (!_stream) return;
   const scope = meta.scope || currentScopeLabel();
   const question = meta.question || null;
+  _currentAction = action;
   _stream.startRun({ question: question || '', scope, action });
   const blocks = composeForAction(action, result, { question, scope });
   for (const block of blocks) _stream.block(block);
   _stream.finish();
   openExplainBoard();
+}
+
+/**
+ * Re-compose the board on screen from a fresh result, in place.
+ *
+ * A live board must not start a new run to update: a run start empties the
+ * document, which would blank the panel and throw away the operator's scroll
+ * position once a minute. This swaps the whole block list in one event
+ * instead, and the renderer's id/signature reconciliation leaves every
+ * unchanged block's DOM where it is.
+ *
+ * Only applies while the board is open on the same action — a refresh never
+ * reopens a board the operator closed or replaces a different answer.
+ *
+ * @param {string} action
+ * @param {object} result
+ * @param {{question?: string|null, scope?: string|null}} [meta]
+ * @returns {boolean} Whether the board was updated.
+ */
+export function refreshExplainResult(action, result, meta = {}) {
+  if (!_stream || currentExplainAction() !== action) return false;
+  const state = _stream.getState();
+  const blocks = composeForAction(action, result, {
+    question: meta.question || state.question || null,
+    scope: meta.scope || state.scope || null,
+  });
+  _stream.emit({ type: EVENT.CUSTOM, name: CUSTOM_EVENT.BLOCKS, value: blocks });
+  // A block that changed under a refresh is an update, not an arrival: numbers
+  // snap (DESIGN-V5 §10). Marked before the next style pass, so no fade runs.
+  for (const child of _dom?.body?.children || []) {
+    if (child.dataset) child.dataset.settled = 'true';
+  }
+  return true;
 }
 
 /**
@@ -192,6 +237,7 @@ export async function askExplainBoard(text) {
   const scope = currentScopeLabel();
   const question = routed.question || String(text || '');
 
+  _currentAction = routed.action || null;
   _stream.startRun({ question, scope, action: routed.action });
   openExplainBoard();
 
@@ -288,6 +334,9 @@ export function initExplainBoard({ viewer, runAction = null } = {}) {
   // composer open a board — a camera move is not an explanation.
   _unsubscribeBus = onActionResult(({ action, result, meta }) => {
     if (!EXPLAINABLE.has(action)) return;
+    // The chat panel (src/chat/) renders its own terse result line inline —
+    // popping this board open too would steal focus mid-conversation there.
+    if (meta.origin === 'chat') return;
     explainResult(action, result, meta);
   });
 

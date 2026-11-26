@@ -405,6 +405,21 @@ test('the menu contains the owner-ordered missions', () => {
     'the infrastructure mission must be gone, not dormant');
 });
 
+test('activate-network has no default brand and never invents one', () => {
+  assert.equal(FIRST_RUN_MISSIONS['activate-network'].brand, undefined,
+    'the tile must not silently activate a specific business for every visitor');
+});
+
+test('activating the network with no brand asks for input instead of guessing one', async () => {
+  let activated = null;
+  const outcome = await runFirstRunChoice('activate-network', {
+    activateNetwork: async (name) => { activated = name; },
+  });
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.needsInput, true);
+  assert.equal(activated, null, 'no business must be activated when none was named');
+});
+
 test('Live Contacts and Space Missions go through the one setContextMode facade', async () => {
   for (const [choice, mode] of [['contacts', 'contacts'], ['space-missions', 'space-missions']]) {
     const spy = missionSpy();
@@ -631,17 +646,29 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  // Baseline re-derived deliberately, twice. First when the retail build added
-  // get_view_health / get_portfolio_health and rewrote the cool-off tool
-  // description; then again for the R.1 rename, which shortened tool
-  // descriptions without adding, removing, or re-parameterizing a single tool.
-  // Both were separate changes, NOT the mission mapping — the rule this test
-  // exists to protect (missions ride existing tools and never touch the schema)
-  // is unchanged, and this pin is what still enforces it.
-  assert.equal(block.length, 41430, 'tool schema byte length drifted from the baseline');
+  // Baseline re-derived deliberately, five times now. First when the retail
+  // build added get_view_health / get_portfolio_health and rewrote the cool-off
+  // tool description; then for the R.1 rename, which shortened descriptions
+  // without adding or re-parameterizing a tool; then for the conversational
+  // onboarding build, which added onboard_business, discover_network,
+  // inspect_chokepoint and return_to_portfolio (40 tools -> 44) and corrected
+  // activate_network's description, which still told the model to call the gap
+  // numbers synthetic after the gap model stopped producing them; then for
+  // the retail-intelligence orchestration build, which added get_local_news
+  // and get_full_insight (44 tools -> 46); and now for the store-agent build,
+  // which retired the remote par_intelligence MCP tool and added seven
+  // function tools in its place — get_store_performance, get_store_pulse,
+  // get_member_intelligence, get_campaign_performance, recommend_offer,
+  // create_offer and deploy_offer (46 tools -> 53). No existing tool was
+  // touched, which the companion digest in src/radioMarkup.test.mjs proves
+  // independently: its 21-tool `unchanged` set still hashes to the same value.
+  // Every one was a separate, deliberate change, NOT the mission mapping — the
+  // rule this test protects (missions ride existing tools and never touch the
+  // schema) is unchanged, and this pin is what still enforces it.
+  assert.equal(block.length, 59666, 'tool schema byte length drifted from the baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'b19a3366f7131c4ec212fa1be47f7709f2ef9a37ad5ba31a68cd708dfe05e0d3',
+    'c325a6c87df6589f3533baf29e48b4ae1f5574732e88850ed45599c3a2224565',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

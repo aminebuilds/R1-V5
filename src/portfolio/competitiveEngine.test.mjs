@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   inferCompetitors,
   scoreSiteVsCompetitors,
+  compareSiteTrafficToCompetitors,
   analyzeCompetitivePosition,
 } from './competitiveEngine.js';
 
@@ -77,6 +78,48 @@ test('scoreSiteVsCompetitors dominance is a pure function of measured density', 
   ]);
   assert.equal(crowded.dominanceScore, 54);
   assert.equal(crowded.status, 'Contested');
+});
+
+test('scoreSiteVsCompetitors exposes the nearest few competitors for a traffic comparison', () => {
+  const site = { id: 'site:1', name: 'Store', lat: 30.2672, lon: -97.7431 };
+  const comps = [
+    { id: 'c1', name: 'Rival A', lat: 30.2675, lon: -97.7435 },
+    { id: 'c2', name: 'Rival B', lat: 30.2690, lon: -97.7440 },
+    { id: 'c3', name: 'Rival C', lat: 30.2800, lon: -97.7431 },
+    { id: 'c4', name: 'Rival D', lat: 30.3100, lon: -97.7431 }, // > 3km, excluded
+  ];
+  const score = scoreSiteVsCompetitors(site, comps);
+  assert.ok(score.nearbyForTraffic.length <= 3);
+  assert.ok(score.nearbyForTraffic.every((c) => c.distM <= 3000));
+  // Sorted nearest-first.
+  for (let i = 1; i < score.nearbyForTraffic.length; i++) {
+    assert.ok(score.nearbyForTraffic[i].distM >= score.nearbyForTraffic[i - 1].distM);
+  }
+});
+
+test('compareSiteTrafficToCompetitors reports unavailable, never a guess, when the site has no live reading', async () => {
+  const breakdown = scoreSiteVsCompetitors(
+    { id: 'site:1', name: 'Store', lat: 30.2672, lon: -97.7431 },
+    [{ id: 'c1', name: 'Rival A', lat: 30.2675, lon: -97.7435 }],
+    // no flow passed — trafficLevel is null
+  );
+  const result = await compareSiteTrafficToCompetitors(breakdown);
+  assert.equal(result.confidence, 'unavailable');
+  assert.equal(result.leadingCompetitor, null);
+  assert.equal(result.evaluated, 0);
+  assert.match(result.readout, /no live flow reading/);
+});
+
+test('compareSiteTrafficToCompetitors reports unavailable when nothing is within range to compare', async () => {
+  const breakdown = scoreSiteVsCompetitors(
+    { id: 'site:1', name: 'Store', lat: 30.2672, lon: -97.7431 },
+    [], // no competitors at all
+    { trafficLevel: 0.3, roadType: 'primary' },
+  );
+  const result = await compareSiteTrafficToCompetitors(breakdown);
+  assert.equal(result.confidence, 'unavailable');
+  assert.equal(result.leadingCompetitor, null);
+  assert.match(result.readout, /no mapped competitor/);
 });
 
 test('analyzeCompetitivePosition never fabricates competitors when search finds none', async () => {

@@ -21,9 +21,12 @@ import { evaluateCoolOffOpportunities } from './coolOffOpportunityEngine.js';
 import { renderHeatmapData, setHeatmapMode, getHeatmapMode } from './competitiveHeatmap.js';
 import { geocodeAddress } from './geocodeClient.js';
 import { rankSitesByGap, totalRecoverableGapUsd } from './gapModel.js';
+import { mergeSiteCoordinates } from './siteModel.js';
 import { addSites, loadPortfolio, savePortfolio, subscribePortfolio } from './portfolioStore.js';
 import { fetchSiteTraffic } from './siteTraffic.js';
 import { importSitesCsv } from './sitesCsv.js';
+import { attachSearchSuggestions } from './searchSuggestions.js';
+import { discoverBrandNetwork } from './networkDiscovery.js';
 
 const SITES_LAYER_ID = 'sites';
 
@@ -372,10 +375,29 @@ export async function searchAndAddBusiness(query, bias = {}) {
   }
   if (!trimmed) return { addedCount: 0, error: 'empty-query', query: trimmed };
 
+  // A recognized chain/brand must return EVERY nearby location, not one
+  // fuzzy-matched guess — searchBusinessSites (Places + Overpass) is the
+  // authoritative chain-store lookup and always runs first. JARVIS's
+  // single-best-match fuzzy/geocoder is only a fallback for queries that
+  // aren't a known chain (a specific street address, a one-off business
+  // name Places/OSM don't have under that brand). Previously the fuzzy path
+  // ran first and any single weak match (e.g. a geocoder hit on the literal
+  // string) short-circuited the real multi-site search, so searching a
+  // well-known chain could add just one unrelated address instead of its
+  // network.
+  const { sites, error } = await searchBusinessSites(trimmed, { biasLat, biasLon });
+  if (sites.length) {
+    addToPortfolio(sites);
+    if (_dom) {
+      _dom.importStatus.textContent = `${sites.length} location${sites.length === 1 ? '' : 's'} found for "${trimmed}" — added to your portfolio.`;
+    }
+    return { addedCount: sites.length, error: null, query: trimmed };
+  }
+
   const fuzzyResult = await executeJarvisFuzzySearch(trimmed, { biasLat, biasLon });
 
   if (fuzzyResult.success && fuzzyResult.matches.length > 0) {
-    const sites = fuzzyResult.matches.map((m) => ({
+    const fuzzySites = fuzzyResult.matches.map((m) => ({
       id: m.id || `site:fuzzy:${m.lat.toFixed(4)},${m.lon.toFixed(4)}`,
       name: m.name,
       address: m.address,
@@ -385,28 +407,80 @@ export async function searchAndAddBusiness(query, bias = {}) {
       geocodeSource: fuzzyResult.source,
     }));
 
-    addToPortfolio(sites);
+    addToPortfolio(fuzzySites);
 
     if (_dom) {
       _dom.importStatus.textContent = fuzzyResult.jarvisReadout;
     }
-    return { addedCount: sites.length, error: null, query: trimmed, jarvisReadout: fuzzyResult.jarvisReadout };
+    return { addedCount: fuzzySites.length, error: null, query: trimmed, jarvisReadout: fuzzyResult.jarvisReadout };
   }
-
-  // Fallback to standard searchBusinessSites
-  const { sites, error } = await searchBusinessSites(trimmed, { biasLat, biasLon });
-  if (sites.length) addToPortfolio(sites);
 
   if (_dom) {
-    if (sites.length) {
-      _dom.importStatus.textContent = `${sites.length} location${sites.length === 1 ? '' : 's'} found for "${trimmed}" — added to your portfolio.`;
-    } else {
-      _dom.importStatus.textContent = error === 'no-results'
-        ? `No locations found for "${trimmed}" near the current view.`
-        : `Search for "${trimmed}" failed.`;
-    }
+    _dom.importStatus.textContent = error === 'no-results' || !error
+      ? `No locations found for "${trimmed}" near the current view.`
+      : `Search for "${trimmed}" failed.`;
   }
-  return { addedCount: sites.length, error: sites.length ? null : error, query: trimmed };
+  return { addedCount: 0, error: error || 'no-results', query: trimmed };
+}
+
+/**
+ * Sweep a whole region for one brand's sites and add them to the portfolio.
+ *
+ * The scale path: `searchAndAddBusiness` asks Google Places what is near one
+ * point and returns dozens; this tiles a region into bounded Overpass queries
+ * and returns what OpenStreetMap knows about the brand across all of it,
+ * which for a national chain is thousands.
+ *
+ * The returned `coverage` carries the OSM-completeness caveat. Callers must
+ * pass it through — the count is a floor on the operator's footprint, not a
+ * verified store list, and presenting it as the latter would be exactly the
+ * kind of confident-but-unearned number this product refuses to ship.
+ *
+ * @param {string} businessName
+ * @param {{region?: string, verticalId?: string, signal?: AbortSignal}} [opts]
+ * @returns {Promise<{addedCount: number, portfolioTotal: number, coverage: object, error: string|null}>}
+ */
+export async function discoverAndAddNetwork(businessName, { region, verticalId, signal } = {}) {
+  const trimmed = String(businessName || '').trim();
+  if (_dom) {
+    _styleManager?.setPanelCollapsed?.('sites-panel', false, { explicit: true });
+    _dom.importStatus.textContent = `Sweeping ${region || 'the region'} for ${trimmed || 'the brand'}…`;
+    _dom.portfolioSummary.replaceChildren();
+  }
+  if (!trimmed) return { addedCount: 0, portfolioTotal: loadPortfolio().length, coverage: null, error: 'empty-business-name' };
+
+  const result = await discoverBrandNetwork(trimmed, {
+    region,
+    verticalId,
+    signal,
+    onProgress: ({ done, total, found }) => {
+      if (_dom) _dom.importStatus.textContent = `Sweeping ${region || 'region'} — tile ${done}/${total}, ${found} found…`;
+    },
+  });
+
+  if (!result.ok || result.sites.length === 0) {
+    if (_dom) {
+      _dom.importStatus.textContent = result.error
+        ? `Network sweep failed: ${result.error}`
+        : `No OpenStreetMap-mapped ${trimmed} sites found in ${region || 'that region'}.`;
+    }
+    return {
+      addedCount: 0,
+      portfolioTotal: loadPortfolio().length,
+      coverage: result.coverage,
+      error: result.error || 'no-sites-found',
+    };
+  }
+
+  const before = loadPortfolio().length;
+  const merged = addToPortfolio(result.sites);
+  const addedCount = merged.length - before;
+  if (_dom) {
+    _dom.importStatus.textContent = `${addedCount} ${trimmed} sites added from OpenStreetMap across ${result.coverage.region || region}.`;
+  }
+  await renderGapQueue(merged, 'all');
+
+  return { addedCount, portfolioTotal: merged.length, coverage: result.coverage, error: null };
 }
 
 /**
@@ -505,6 +579,68 @@ export async function activateNetwork(businessName, bias = {}) {
       : null,
     competitiveScore: compScore,
     coolOffAlert,
+  };
+}
+
+const hasCoords = (site) => Number.isFinite(site?.lat) && Number.isFinite(site?.lon);
+
+/**
+ * Retry geocoding for portfolio sites already saved (they show up in the gap
+ * queue / portfolio counts) but still pending coordinates — the case where
+ * `get_portfolio_health` reports `ungeocodedSites > 0` and the caller (chat,
+ * voice, or the panel itself) has no new business name to search with, only
+ * the existing stored name/address. Mirrors the geocode-retry logic in
+ * `sitesCsv.js`, applied to the persisted portfolio instead of a fresh import.
+ * @param {{biasLat?: number, biasLon?: number}} [bias]
+ * @returns {Promise<{attempted: number, resolvedCount: number, stillPendingCount: number, resolved: Array<{name:string, address:string}>, pending: Array<{name:string, address:string|null, reason:string}>}>}
+ */
+export async function regeocodePendingSites(bias = {}) {
+  const portfolio = loadPortfolio();
+  const withAddress = portfolio.filter((s) => !hasCoords(s) && s.address);
+  const withoutAddress = portfolio.filter((s) => !hasCoords(s) && !s.address);
+
+  const resolved = [];
+  const pending = withoutAddress.map((s) => ({ name: s.name, address: s.address || null, reason: 'no-address' }));
+
+  if (withAddress.length > 0) {
+    const { biasLat, biasLon } = Number.isFinite(bias.biasLat) && Number.isFinite(bias.biasLon)
+      ? bias
+      : cameraBias();
+    const byId = new Map(portfolio.map((s) => [s.id, s]));
+    let index = 0;
+    const lanes = new Array(Math.min(5, withAddress.length)).fill(0).map(async () => {
+      while (index < withAddress.length) {
+        const site = withAddress[index++];
+        try {
+          const result = await geocodeAddress(site.address, { biasLat, biasLon });
+          if (result) {
+            byId.set(site.id, mergeSiteCoordinates(site, { lat: result.lat, lon: result.lon, source: 'address' }));
+            resolved.push({ name: site.name, address: site.address });
+          } else {
+            pending.push({ name: site.name, address: site.address, reason: 'geocode-empty' });
+          }
+        } catch (err) {
+          const reason = err?.name === 'AbortError' ? 'geocode-aborted' : `geocode-error:${err?.message || 'unknown'}`;
+          pending.push({ name: site.name, address: site.address, reason });
+        }
+      }
+    });
+    await Promise.all(lanes);
+    savePortfolio([...byId.values()]);
+  }
+
+  if (_dom && (resolved.length || pending.length)) {
+    _dom.importStatus.textContent = pending.length
+      ? `${resolved.length} site${resolved.length === 1 ? '' : 's'} placed on the map · ${pending.length} still pending.`
+      : `${resolved.length} site${resolved.length === 1 ? '' : 's'} placed on the map.`;
+  }
+
+  return {
+    attempted: withAddress.length,
+    resolvedCount: resolved.length,
+    stillPendingCount: pending.length,
+    resolved,
+    pending,
   };
 }
 
@@ -633,6 +769,15 @@ export function initSitesPanel({ viewer, styleManager, dataManager } = {}) {
   });
 
   const runActivate = () => activateNetwork(_dom.businessSearchInput?.value);
+  // Attached before the plain "Enter submits" listener below so a selected
+  // suggestion's keydown handler (which calls stopImmediatePropagation) runs
+  // first and this input never double-fires on the same Enter press.
+  if (_dom.businessSearchInput) {
+    attachSearchSuggestions(_dom.businessSearchInput, {
+      getBias: cameraBias,
+      onSelect: () => runActivate(),
+    });
+  }
   _dom.businessSearchBtn?.addEventListener('click', runActivate);
   _dom.businessSearchInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') runActivate();

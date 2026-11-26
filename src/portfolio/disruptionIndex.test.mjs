@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CHOKEPOINTS,
+  buildVolatilityHistory,
   computeDisruptionIndex,
   correlate,
   countTankersInGate,
@@ -11,6 +12,7 @@ import {
   isTankerInGate,
   median,
   realisedVolatility,
+  isTankerType,
   stdDev,
 } from './disruptionIndex.js';
 
@@ -35,6 +37,43 @@ test('countTankersInGate counts only qualifying vessels', () => {
   ], HORMUZ);
   assert.equal(count, 2);
   assert.equal(vessels.length, 2);
+});
+
+test('the LIVE feed vocabulary is numeric AIS codes, and it must count', () => {
+  // AISStream sends ShipType as the raw ITU-R M.1371 code, so production only
+  // ever saw values like "80" and "70". Matching on text alone made the tanker
+  // count structurally zero everywhere while these tests passed on prose
+  // fixtures — this is the case that was missing.
+  assert.equal(isTankerType('80'), true, '80 = tanker, all ships of this type');
+  assert.equal(isTankerType('84'), true, '81-84 = hazardous categories A-D');
+  assert.equal(isTankerType('89'), true, '85-89 = tanker, reserved/no extra info');
+  assert.equal(isTankerType('70'), false, '70-79 is CARGO and must never count');
+  assert.equal(isTankerType('79'), false);
+  assert.equal(isTankerType('37'), false, 'pleasure craft');
+  assert.equal(isTankerType(80), true, 'numbers as well as numeric strings');
+});
+
+test('a missing or "not available" ship type is unknown, not "not a tanker"', () => {
+  // Most live contacts carry no type at all. Folding those into `false` would
+  // report a confident zero built mostly on contacts nobody classified.
+  assert.equal(isTankerType(null), null);
+  assert.equal(isTankerType(undefined), null);
+  assert.equal(isTankerType(''), null);
+  assert.equal(isTankerType('   '), null);
+  assert.equal(isTankerType('0'), null, 'AIS 0 means "not available"');
+});
+
+test('the gate count reports how much of the gate it could actually classify', () => {
+  const result = countTankersInGate([
+    { lat: 26.4, lon: 56.5, shipType: '80' },
+    { lat: 26.5, lon: 56.6, shipType: '70' },
+    { lat: 26.5, lon: 56.6, shipType: null },
+    { lat: 26.5, lon: 56.6, shipType: '0' },
+    { lat: 10.0, lon: 20.0, shipType: '80' },
+  ], HORMUZ);
+  assert.equal(result.count, 1, 'one tanker inside the box');
+  assert.equal(result.inGate, 4, 'four contacts inside the box');
+  assert.equal(result.unclassified, 2, 'two of them carry no usable type');
 });
 
 test('stdDev and median handle short and dirty input', () => {
@@ -86,6 +125,23 @@ test('the index is null — not 50 — when nothing is measurable', () => {
   assert.equal(result.level, 'unavailable');
   assert.equal(result.confidence, 'unavailable');
   assert.match(result.readout, /not computed/);
+});
+
+test('buildVolatilityHistory needs no network call — derives current+history from a spot series already in hand', () => {
+  const points = Array.from({ length: 400 }, (_, i) => {
+    const d = new Date(Date.UTC(2024, 0, 1) + i * 86_400_000);
+    return { period: d.toISOString().slice(0, 10), value: 80 + Math.sin(i / 5) * 4 + (i % 30 === 0 ? 6 : 0) };
+  });
+  const { current, history } = buildVolatilityHistory(points);
+  assert.ok(Number.isFinite(current) && current > 0);
+  assert.ok(history.length >= 2, 'needs at least two history points to score a departure');
+  assert.ok(history.every((v) => Number.isFinite(v) && v > 0));
+});
+
+test('buildVolatilityHistory reports current null on too little data, never a guess', () => {
+  const { current, history } = buildVolatilityHistory([{ period: '2026-01-01', value: 80 }]);
+  assert.equal(current, null);
+  assert.deepEqual(history, []);
 });
 
 test('a partial index says how partial it is', () => {

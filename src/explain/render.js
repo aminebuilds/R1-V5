@@ -17,6 +17,7 @@
  */
 
 import { NO_VALUE, provenance } from './blocks.js';
+import { AIRSPACE_RENDERERS } from './airspaceRender.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -394,9 +395,17 @@ function renderSources(doc, block) {
   const list = el(doc, 'ul', 'xp-source-list');
   for (const item of block.items) {
     const row = el(doc, 'li', 'xp-source');
+    let label = el(doc, 'span', 'xp-source-label', item.label);
+    if (item.url) {
+      // Already filtered to http(s) by the block builder.
+      label = el(doc, 'a', 'xp-source-label', item.label);
+      label.setAttribute('href', item.url);
+      label.setAttribute('target', '_blank');
+      label.setAttribute('rel', 'noopener noreferrer');
+    }
     append(
       row,
-      el(doc, 'span', 'xp-source-label', item.label),
+      label,
       item.detail ? el(doc, 'span', 'xp-source-detail', item.detail) : null,
     );
     append(list, row);
@@ -422,6 +431,462 @@ function renderNote(doc, block) {
   return node;
 }
 
+/* -- Store-agent blocks -------------------------------------------------- */
+
+/** Namespaced element with attributes. */
+function svgEl(doc, tag, attrs = {}) {
+  const node = doc.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attrs)) {
+    if (value !== null && value !== undefined) node.setAttribute(name, String(value));
+  }
+  return node;
+}
+
+/** Namespaced text node. */
+function svgText(doc, text, attrs = {}) {
+  const node = svgEl(doc, 'text', attrs);
+  node.textContent = String(text == null ? '' : text);
+  return node;
+}
+
+function renderSeries(doc, block) {
+  const node = el(doc, 'div', 'xp-series');
+  append(node, sectionHead(doc, block.title));
+  const points = block.points || [];
+  if (points.length === 0) {
+    append(node, el(doc, 'p', 'xp-note', 'Nothing to plot.'));
+    return node;
+  }
+
+  const max = Math.max(
+    1,
+    ...points.map((point) => Math.max(point.value ?? 0, point.compare ?? 0)),
+  );
+  const chart = el(doc, 'div', 'xp-series-chart');
+  for (const point of points) {
+    const column = el(doc, 'div', 'xp-series-col');
+    if (point.partial) column.dataset.partial = 'true';
+    const stack = el(doc, 'div', 'xp-series-stack');
+
+    // The prior period sits behind as a ghost outline. A delta the operator
+    // can see beats a delta the board asserts.
+    if (point.compare !== null) {
+      const ghost = el(doc, 'div', 'xp-series-ghost');
+      ghost.style.height = `${((point.compare / max) * 100).toFixed(1)}%`;
+      ghost.title = `Prior period: ${point.compare}`;
+      append(stack, ghost);
+    }
+    const bar = el(doc, 'div', 'xp-series-bar');
+    bar.style.height = `${(((point.value ?? 0) / max) * 100).toFixed(1)}%`;
+    bar.dataset.tone = point.tone;
+    if (point.partial) bar.dataset.partial = 'true';
+    bar.title = point.partial
+      ? `${point.label}: ${point.display} so far (day not complete)`
+      : `${point.label}: ${point.display}`;
+    append(stack, bar);
+
+    append(
+      column,
+      stack,
+      el(doc, 'span', 'xp-series-value', point.display),
+      point.deltaPct === null
+        ? null
+        : (() => {
+          const delta = el(doc, 'span', 'xp-series-delta', `${point.deltaPct > 0 ? '+' : point.deltaPct < 0 ? '−' : ''}${Math.abs(point.deltaPct).toFixed(1)}%`);
+          delta.dataset.tone = point.deltaPct > 1 ? 'signal' : point.deltaPct < -1 ? 'alert' : 'ghost';
+          return delta;
+        })(),
+      el(doc, 'span', 'xp-series-label', point.label),
+      point.sub ? el(doc, 'span', 'xp-series-sub', point.sub) : null,
+    );
+    append(chart, column);
+  }
+
+  append(node, chart);
+  const footer = el(doc, 'div', 'xp-series-foot');
+  append(footer, kindChip(doc, block.kind), block.note ? el(doc, 'span', 'xp-series-note', block.note) : null);
+  return append(node, footer);
+}
+
+function renderRoster(doc, block) {
+  const node = el(doc, 'div', 'xp-roster');
+  append(node, sectionHead(doc, block.title));
+  for (const card of block.cards) {
+    const item = el(doc, 'article', 'xp-member');
+    item.dataset.tone = card.tone;
+
+    const top = el(doc, 'div', 'xp-member-head');
+    append(
+      top,
+      keyBadge(doc, card.key),
+      (() => {
+        const identity = el(doc, 'div', 'xp-member-identity');
+        append(
+          identity,
+          el(doc, 'h4', 'xp-member-name', card.name),
+          card.sub ? el(doc, 'span', 'xp-member-sub', card.sub) : null,
+        );
+        return identity;
+      })(),
+      card.badge
+        ? (() => {
+          const badge = el(doc, 'span', 'xp-member-badge', card.badge);
+          badge.dataset.tone = card.tone;
+          return badge;
+        })()
+        : null,
+    );
+    append(item, top);
+
+    if (card.meter !== null) append(item, meter(doc, card.meter, card.tone));
+
+    if (card.stats.length) {
+      const stats = el(doc, 'div', 'xp-member-stats');
+      for (const stat of card.stats) {
+        const cell = el(doc, 'div', 'xp-member-stat');
+        append(
+          cell,
+          el(doc, 'span', 'xp-member-stat-label', stat.label),
+          el(doc, 'span', 'xp-member-stat-value', stat.value),
+        );
+        cell.dataset.kind = stat.kind;
+        append(stats, cell);
+      }
+      append(item, stats);
+    }
+
+    if (card.tags.length) {
+      const tags = el(doc, 'div', 'xp-member-tags');
+      for (const tag of card.tags) append(tags, el(doc, 'span', 'xp-member-tag', tag));
+      append(item, tags);
+    }
+
+    if (card.note) append(item, el(doc, 'p', 'xp-member-note', card.note));
+    append(node, item);
+  }
+  if (block.note) append(node, el(doc, 'p', 'xp-note', block.note));
+  return node;
+}
+
+function renderCampaigns(doc, block) {
+  const node = el(doc, 'div', 'xp-campaigns');
+  append(node, sectionHead(doc, block.title));
+
+  for (const row of block.rows) {
+    const item = el(doc, 'article', 'xp-campaign');
+    item.dataset.tone = row.tone;
+
+    const top = el(doc, 'div', 'xp-campaign-head');
+    const verdict = el(doc, 'span', 'xp-campaign-verdict', row.verdictLabel);
+    verdict.dataset.tone = row.tone;
+    append(
+      top,
+      keyBadge(doc, row.key),
+      (() => {
+        const identity = el(doc, 'div', 'xp-campaign-identity');
+        append(
+          identity,
+          el(doc, 'h4', 'xp-campaign-name', row.name),
+          row.sub ? el(doc, 'span', 'xp-campaign-sub', row.sub) : null,
+        );
+        return identity;
+      })(),
+      verdict,
+    );
+    append(item, top);
+
+    // Pace against plan, with the plan drawn at 100%. Over and under are
+    // then a glance rather than a subtraction.
+    if (row.paceRatio !== null) {
+      const pace = el(doc, 'div', 'xp-pace');
+      const track = el(doc, 'div', 'xp-pace-track');
+      const fill = el(doc, 'div', 'xp-pace-fill');
+      const scale = Math.max(1.5, row.paceRatio);
+      fill.style.width = `${Math.min(100, (row.paceRatio / scale) * 100).toFixed(1)}%`;
+      fill.dataset.tone = row.tone;
+      const plan = el(doc, 'div', 'xp-pace-plan');
+      plan.style.left = `${((1 / scale) * 100).toFixed(1)}%`;
+      plan.title = 'Forecast pace for the days elapsed';
+      append(track, fill, plan);
+      append(pace, track, el(doc, 'span', 'xp-pace-value', row.paceDisplay));
+      append(item, pace);
+    }
+
+    // Measured and modelled sit in two labelled columns and never merge.
+    const columns = el(doc, 'div', 'xp-campaign-cols');
+    for (const [heading, stats, kind] of [
+      ['Done', row.measured, 'measured'],
+      ['Planned', row.forecast, 'modelled'],
+    ]) {
+      if (!stats.length) continue;
+      const column = el(doc, 'div', 'xp-campaign-col');
+      const columnHead = el(doc, 'div', 'xp-campaign-col-head');
+      append(columnHead, el(doc, 'span', 'xp-campaign-col-label', heading), kindChip(doc, kind));
+      append(column, columnHead);
+      for (const stat of stats) {
+        const line = el(doc, 'div', 'xp-campaign-stat');
+        append(
+          line,
+          el(doc, 'span', 'xp-campaign-stat-label', stat.label),
+          el(doc, 'span', 'xp-campaign-stat-value', stat.value),
+        );
+        append(column, line);
+      }
+      append(columns, column);
+    }
+    append(item, columns);
+
+    if (row.trend) {
+      const trend = el(doc, 'span', 'xp-campaign-trend', row.trend);
+      append(item, trend);
+    }
+    if (row.advice) append(item, el(doc, 'p', 'xp-campaign-advice', row.advice));
+    append(node, item);
+  }
+
+  if (block.note) append(node, el(doc, 'p', 'xp-note', block.note));
+  return node;
+}
+
+/**
+ * The motif mark that identifies what the offer is about at a glance.
+ * Drawn in a 24x24 box so every layout can place it the same way.
+ */
+function motifMark(doc, motif, color) {
+  const group = svgEl(doc, 'g', { fill: 'none', stroke: color, 'stroke-width': '1.6', 'stroke-linecap': 'square' });
+  const paths = {
+    coffee: ['M5 8h11v7a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8z', 'M16 10h2a2.5 2.5 0 0 1 0 5h-2', 'M8 3v2.5', 'M12 3v2.5'],
+    fuel: ['M5 20V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v15', 'M4 20h11', 'M14 9h3l2 2v6a1.5 1.5 0 0 1-3 0v-4h-2', 'M7 7h5v4H7z'],
+    wash: ['M6 13a6 6 0 0 1 12 0', 'M12 19v-9', 'M4 8l2 2', 'M20 8l-2 2', 'M12 3v3'],
+    food: ['M4 16l8-11 8 11z', 'M7 16h10', 'M10 11h4'],
+    // A tapered cup alone reads as a waste bin at small sizes, so the lid
+    // and straw are what actually carry the meaning here.
+    cold: ['M7 8h10l-1.2 11.5H8.2z', 'M5.5 6h13v2h-13z', 'M13.5 6V2.5h3'],
+    points: ['M12 3l2.6 5.7L21 9.5l-4.5 4.4 1.1 6.1L12 17l-5.6 3 1.1-6.1L3 9.5l6.4-.8z'],
+  }[motif] || ['M12 3l2.6 5.7L21 9.5l-4.5 4.4 1.1 6.1L12 17l-5.6 3 1.1-6.1L3 9.5l6.4-.8z'];
+  for (const d of paths) group.appendChild(svgEl(doc, 'path', { d }));
+  return group;
+}
+
+/**
+ * Draw the advertisement.
+ *
+ * Each surface gets its own composition rather than one layout rescaled: a
+ * canopy read at 40 mph and an app card read in the hand are different
+ * design problems, and showing the same rectangle twice would hide the only
+ * thing this panel exists to let an operator judge.
+ *
+ * @param {Document} doc
+ * @param {object} card
+ * @returns {Element|null}
+ */
+function renderAd(doc, card) {
+  if (!doc.createElementNS) return null;
+  const [aw, ah] = card.aspect;
+  const width = 400;
+  const height = Math.round((width * ah) / aw);
+  const { accent, ink, paper } = card.palette;
+
+  const svg = svgEl(doc, 'svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    class: 'xp-ad-canvas',
+    role: 'img',
+    preserveAspectRatio: 'xMidYMid meet',
+    'aria-label': `${card.surfaceLabel} creative: ${card.headline}${card.value ? `, ${card.value}` : ''}`,
+  });
+  svg.appendChild(svgEl(doc, 'rect', { x: 0, y: 0, width, height, fill: ink }));
+
+  const put = (node) => svg.appendChild(node);
+  const label = (text, attrs) => put(svgText(doc, text, { 'font-family': 'IBM Plex Mono, monospace', ...attrs }));
+  const display = (text, attrs) => put(svgText(doc, text, { 'font-family': 'Archivo, Helvetica Neue, sans-serif', 'font-weight': '700', ...attrs }));
+
+  /** Break a headline onto at most `lines` rows without splitting words. */
+  const wrap = (text, perLine, lines) => {
+    const words = String(text).split(/\s+/);
+    const rows = [];
+    let current = '';
+    for (const word of words) {
+      if (!current) current = word;
+      else if ((current + ' ' + word).length <= perLine) current += ` ${word}`;
+      else { rows.push(current); current = word; }
+      if (rows.length === lines) break;
+    }
+    if (current && rows.length < lines) rows.push(current);
+    return rows;
+  };
+
+  if (card.surfaceId === 'canopy') {
+    put(svgEl(doc, 'rect', { x: 0, y: 0, width: 10, height, fill: accent }));
+    display(card.value || '', { x: 30, y: height * 0.62, 'font-size': height * 0.44, fill: accent, 'letter-spacing': '-2' });
+    const valueWidth = (card.value || '').length * height * 0.24;
+    const headlineX = 30 + valueWidth + 22;
+    wrap(card.headline, 16, 2).forEach((line, index) => {
+      display(line, { x: headlineX, y: height * 0.42 + index * height * 0.24, 'font-size': height * 0.19, fill: paper, 'letter-spacing': '0.5' });
+    });
+    put(svgEl(doc, 'line', { x1: 30, x2: width - 20, y1: height - 26, y2: height - 26, stroke: paper, 'stroke-opacity': '0.2' }));
+    label(card.sub || '', { x: 30, y: height - 10, 'font-size': 10, fill: paper, 'fill-opacity': '0.65', 'letter-spacing': '2' });
+    label(card.brand || '', { x: width - 20, y: height - 10, 'font-size': 10, fill: accent, 'letter-spacing': '1.5', 'text-anchor': 'end' });
+    return svg;
+  }
+
+  if (card.surfaceId === 'pump-topper') {
+    label(card.kicker || '', { x: width / 2, y: 34, 'font-size': 12, fill: accent, 'letter-spacing': '3', 'text-anchor': 'middle' });
+    const mark = motifMark(doc, card.motif, accent);
+    mark.setAttribute('transform', `translate(${width / 2 - 36} ${70}) scale(3)`);
+    put(mark);
+    display(card.value || '', { x: width / 2, y: height * 0.55, 'font-size': 92, fill: paper, 'text-anchor': 'middle', 'letter-spacing': '-3' });
+    wrap(card.headline, 20, 2).forEach((line, index) => {
+      display(line, { x: width / 2, y: height * 0.63 + index * 26, 'font-size': 21, fill: paper, 'text-anchor': 'middle' });
+    });
+    label(card.sub || '', { x: width / 2, y: height * 0.63 + 62, 'font-size': 12, fill: paper, 'fill-opacity': '0.6', 'text-anchor': 'middle' });
+    if (card.cta) {
+      put(svgEl(doc, 'rect', { x: 40, y: height - 76, width: width - 80, height: 40, fill: accent }));
+      display(card.cta, { x: width / 2, y: height - 50, 'font-size': 16, fill: ink, 'text-anchor': 'middle', 'letter-spacing': '2' });
+    }
+    label(card.brand || '', { x: width / 2, y: height - 18, 'font-size': 10, fill: paper, 'fill-opacity': '0.45', 'text-anchor': 'middle', 'letter-spacing': '2' });
+    return svg;
+  }
+
+  if (card.surfaceId === 'in-store-menu') {
+    put(svgEl(doc, 'rect', { x: 0, y: 0, width, height: 6, fill: accent }));
+    label(card.kicker || '', { x: 26, y: 40, 'font-size': 11, fill: accent, 'letter-spacing': '3' });
+    // The value plate occupies the right third, so the headline column is
+    // ~240px wide. At 23px Archivo bold that is about 14 characters a line
+    // — wrapping any wider runs the copy under the plate.
+    wrap(card.headline, 14, 3).forEach((line, index) => {
+      display(line, { x: 26, y: 74 + index * 27, 'font-size': 23, fill: paper });
+    });
+    wrap(card.sub || '', 44, 2).forEach((line, index) => {
+      label(line, { x: 26, y: 162 + index * 16, 'font-size': 11, fill: paper, 'fill-opacity': '0.6' });
+    });
+    put(svgEl(doc, 'rect', { x: width - 132, y: 44, width: 108, height: 78, fill: accent }));
+    display(card.value || '', { x: width - 78, y: 98, 'font-size': 38, fill: ink, 'text-anchor': 'middle', 'letter-spacing': '-1' });
+    const mark = motifMark(doc, card.motif, paper);
+    mark.setAttribute('transform', `translate(${width - 118} ${height - 56}) scale(1.6)`);
+    put(mark);
+    label(card.terms || '', { x: 26, y: height - 16, 'font-size': 9, fill: paper, 'fill-opacity': '0.4' });
+    return svg;
+  }
+
+  if (card.surfaceId === 'mobile-app') {
+    put(svgEl(doc, 'rect', { x: 18, y: 18, width: width - 36, height: height - 36, fill: '#0D1216', stroke: accent, 'stroke-opacity': '0.4' }));
+    put(svgEl(doc, 'rect', { x: 34, y: 40, width: Math.max(90, (card.kicker || '').length * 6.2), height: 20, fill: accent, 'fill-opacity': '0.16' }));
+    label(card.kicker || '', { x: 42, y: 54, 'font-size': 9, fill: accent, 'letter-spacing': '1.6' });
+    wrap(card.headline, 19, 3).forEach((line, index) => {
+      display(line, { x: 34, y: 100 + index * 28, 'font-size': 24, fill: paper });
+    });
+    display(card.value || '', { x: 34, y: 216, 'font-size': 52, fill: accent, 'letter-spacing': '-2' });
+    const mark = motifMark(doc, card.motif, accent);
+    mark.setAttribute('transform', `translate(${width - 104} 150) scale(2.4)`);
+    put(mark);
+    wrap(card.sub || '', 46, 3).forEach((line, index) => {
+      label(line, { x: 34, y: 248 + index * 15, 'font-size': 10.5, fill: paper, 'fill-opacity': '0.66' });
+    });
+    if (card.cta) {
+      put(svgEl(doc, 'rect', { x: 34, y: height - 100, width: width - 68, height: 42, fill: accent }));
+      display(card.cta, { x: width / 2, y: height - 73, 'font-size': 15, fill: ink, 'text-anchor': 'middle', 'letter-spacing': '1.6' });
+    }
+    wrap(card.terms || '', 62, 2).forEach((line, index) => {
+      label(line, { x: 34, y: height - 40 + index * 12, 'font-size': 8.5, fill: paper, 'fill-opacity': '0.38' });
+    });
+    return svg;
+  }
+
+  if (card.surfaceId === 'register-prompt') {
+    put(svgEl(doc, 'rect', { x: 0, y: 0, width, height: 34, fill: accent }));
+    label(card.kicker || '', { x: 18, y: 22, 'font-size': 12, fill: ink, 'letter-spacing': '2.4' });
+    wrap(card.headline, 16, 2).forEach((line, index) => {
+      display(line, { x: 18, y: 92 + index * 32, 'font-size': 28, fill: paper });
+    });
+    display(card.value || '', { x: 18, y: height - 96, 'font-size': 64, fill: accent, 'letter-spacing': '-2' });
+    label(card.sub || '', { x: 18, y: height - 66, 'font-size': 11, fill: paper, 'fill-opacity': '0.55' });
+    if (card.cta) {
+      put(svgEl(doc, 'rect', { x: 18, y: height - 54, width: width - 36, height: 38, fill: 'none', stroke: accent }));
+      display(card.cta, { x: width / 2, y: height - 28, 'font-size': 15, fill: accent, 'text-anchor': 'middle', 'letter-spacing': '3' });
+    }
+    return svg;
+  }
+
+  // e-receipt: a torn strip, because that is what it is attached to.
+  put(svgEl(doc, 'line', { x1: 0, x2: width, y1: 4, y2: 4, stroke: paper, 'stroke-opacity': '0.25', 'stroke-dasharray': '4 4' }));
+  label(card.kicker || '', { x: 20, y: 34, 'font-size': 9.5, fill: accent, 'letter-spacing': '2.4' });
+  wrap(card.headline, 26, 2).forEach((line, index) => {
+    display(line, { x: 20, y: 62 + index * 22, 'font-size': 20, fill: paper });
+  });
+  display(card.value || '', { x: width - 20, y: 64, 'font-size': 34, fill: accent, 'text-anchor': 'end', 'letter-spacing': '-1' });
+  label(card.terms || '', { x: 20, y: height - 14, 'font-size': 9, fill: paper, 'fill-opacity': '0.42' });
+  return svg;
+}
+
+function renderCreative(doc, block) {
+  const node = el(doc, 'div', 'xp-creative');
+  append(node, sectionHead(doc, block.title));
+  const grid = el(doc, 'div', 'xp-ad-grid');
+
+  for (const card of block.cards) {
+    const frame = el(doc, 'figure', 'xp-ad');
+    frame.dataset.surface = card.surfaceId;
+    const head = el(doc, 'figcaption', 'xp-ad-head');
+    const status = el(doc, 'span', 'xp-ad-status', card.status === 'live' ? 'Live' : 'Staged');
+    status.dataset.tone = card.status === 'live' ? 'signal' : 'ghost';
+    append(head, el(doc, 'span', 'xp-ad-surface', card.surfaceLabel), status);
+
+    const stage = el(doc, 'div', 'xp-ad-stage');
+    stage.style.aspectRatio = `${card.aspect[0]} / ${card.aspect[1]}`;
+    const ad = renderAd(doc, card);
+    if (ad) append(stage, ad);
+    else append(stage, el(doc, 'div', 'xp-ad-fallback', `${card.headline}${card.value ? ` — ${card.value}` : ''}`));
+
+    append(frame, head, stage, card.where ? el(doc, 'p', 'xp-ad-where', card.where) : null);
+    append(grid, frame);
+  }
+
+  append(node, grid);
+  if (block.note) append(node, el(doc, 'p', 'xp-note', block.note));
+  return node;
+}
+
+function renderSurfaces(doc, block) {
+  const node = el(doc, 'div', 'xp-surfaces');
+  append(node, sectionHead(doc, block.title));
+  for (const row of block.rows) {
+    const item = el(doc, 'div', 'xp-surface');
+    item.dataset.status = row.status;
+
+    const top = el(doc, 'div', 'xp-surface-head');
+    const status = el(doc, 'span', 'xp-surface-status', row.statusLabel);
+    status.dataset.tone = row.tone;
+    append(top, el(doc, 'span', 'xp-surface-label', row.label), status);
+
+    const stats = el(doc, 'div', 'xp-surface-stats');
+    append(
+      stats,
+      el(doc, 'span', 'xp-surface-stat', `${row.impressions} impressions/day`),
+      el(doc, 'span', 'xp-surface-stat', `${row.addressable} addressable`),
+      row.timing ? el(doc, 'span', 'xp-surface-stat', row.timing) : null,
+    );
+
+    append(
+      item,
+      top,
+      row.where ? el(doc, 'p', 'xp-surface-where', row.where) : null,
+      stats,
+      // A push that has gone out cannot be recalled, and the operator who
+      // approved it is entitled to see that said plainly.
+      row.irreversible
+        ? (() => {
+          const warn = el(doc, 'p', 'xp-surface-warn', row.note || 'This dispatch cannot be recalled.');
+          warn.dataset.tone = 'caution';
+          return warn;
+        })()
+        : row.note ? el(doc, 'p', 'xp-surface-note', row.note) : null,
+    );
+    append(node, item);
+  }
+  if (block.note) append(node, el(doc, 'p', 'xp-note', block.note));
+  return node;
+}
+
 /** Dispatch table, so an unknown block type is a no-op rather than a crash. */
 const RENDERERS = {
   head: renderHead,
@@ -437,6 +902,12 @@ const RENDERERS = {
   sources: renderSources,
   gap: renderGap,
   note: renderNote,
+  series: renderSeries,
+  roster: renderRoster,
+  campaigns: renderCampaigns,
+  creative: renderCreative,
+  surfaces: renderSurfaces,
+  ...AIRSPACE_RENDERERS,
 };
 
 /**

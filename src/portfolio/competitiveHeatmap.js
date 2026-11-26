@@ -189,11 +189,12 @@ function renderCompetitorPressureHeatmap(clientSites, competitorSites) {
   for (let i = 0; i < competitorSites.length; i++) {
     const c = competitorSites[i];
     if (!Number.isFinite(c.lat) || !Number.isFinite(c.lon)) continue;
+    // Falls back to the index, not Math.random(): a random id changes on
+    // every render, so Cesium sees a brand-new entity each pass instead of
+    // an update, and the ring flickers.
+    const id = c.id || `idx-${i}`;
     _dataSource.entities.add({
-      // Falls back to the index, not Math.random(): a random id changes on
-      // every render, so Cesium sees a brand-new entity each pass instead of
-      // an update, and the ring flickers.
-      id: `comp-rival:${c.id || `idx-${i}`}`,
+      id: `comp-rival:${id}`,
       position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat),
       ellipse: {
         semiMinorAxis: 550.0,
@@ -203,6 +204,21 @@ function renderCompetitorPressureHeatmap(clientSites, competitorSites) {
         outlineColor: Cesium.Color.fromCssColorString('#c026d3').withAlpha(0.85),
         outlineWidth: 1.8,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+    // Discrete pin at the exact competitor coordinate — the ellipse alone
+    // reads as a coverage zone, not a placed location. This is the actual
+    // "there's a competitor right here" marker, styled like a map pin.
+    _dataSource.entities.add({
+      id: `comp-pin:${id}`,
+      position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.fromCssColorString('#d946ef'),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
+        outlineWidth: 1.5,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
   }

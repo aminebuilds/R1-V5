@@ -127,6 +127,10 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
   let _lastUpdate = null;
   let _lastError = null;
   let _enabled = false;
+  /** The last live poll's USGS features (kept while a past window is shown). */
+  let _liveFeatures = [];
+  /** `{endMs, spanMs}` while the time slider holds a past window, else null. */
+  let _historical = null;
 
   const layer = {
   id: 'earthquakes',
@@ -155,6 +159,11 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
     overlayHost.setVisible(EARTHQUAKE_OVERLAY_SOURCE_ID, true);
   },
 
+  /** True while a past window from the time slider is on the map. */
+  isHistorical() {
+    return Boolean(_historical);
+  },
+
   disable(viewer) {
     _enabled = false;
     if (_dataSource) _dataSource.show = false;
@@ -177,76 +186,12 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
         return false;
       }
 
-      _dataSource.entities.removeAll();
-      let count = 0;
-      const overlayEntries = [];
-
-      for (const feature of geojson.features) {
-        const [lon, lat, depthKm] = feature.geometry.coordinates;
-        const mag = feature.properties.mag;
-        const place = feature.properties.place;
-        const time = feature.properties.time;
-
-        if (mag < 2.5) continue; // Skip micro-quakes
-
-        count++;
-        const baseRadius = Math.pow(2, mag) * 1000;
-        const color = depthColor(depthKm || 0);
-        const isSignificant = mag >= 5.0;
-        const fillAlpha = isSignificant ? 0.4 : 0.3;
-        const outlineAlpha = isSignificant ? 1.0 : 0.8;
-
-        const position = Cesium.Cartesian3.fromDegrees(lon, lat);
-        const stableId = feature.id || `event-${count}`;
-        _dataSource.entities.add({
-          id: `earthquake:${stableId}`,
-          position,
-          ellipse: {
-            // Static axes — see the module header. A CallbackProperty here
-            // re-tessellates the clamped ground geometry every frame.
-            semiMajorAxis: baseRadius,
-            semiMinorAxis: baseRadius,
-            material: new Cesium.ColorMaterialProperty(
-              color.withAlpha(fillAlpha)
-            ),
-            outline: true,
-            outlineColor: color.withAlpha(outlineAlpha),
-            outlineWidth: isSignificant ? 3 : 2,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          },
-          properties: {
-            // Analyst seam (additive): the USGS event id (e.g. "us7000abcd").
-            usgsId: feature.id ?? null,
-            mag,
-            place,
-            time,
-            depth: depthKm,
-          },
-        });
-        overlayEntries.push(createEarthquakeOverlayEntry({
-          id: String(stableId),
-          position,
-          magnitude: mag,
-          accent: color.toCssColorString(),
-        }));
-      }
-
-      if (_enabled) {
-        overlayHost.setEntries(
-          EARTHQUAKE_OVERLAY_SOURCE_ID,
-          selectEarthquakeOverlayCohort(overlayEntries),
-          {
-            cohortLimit: EARTHQUAKE_OVERLAY_COHORT_LIMIT,
-            collisionCapacity: EARTHQUAKE_OVERLAY_COLLISION_CAPACITY,
-            moving: false,
-          },
-        );
-      }
-
-      _count = count;
+      _liveFeatures = geojson.features;
       _lastUpdate = Date.now();
       _lastError = null;
-      console.log(`[Data:Earthquakes] Updated: ${_count} events (M2.5+)`);
+      // While the time slider holds a past window, the live poll keeps the
+      // live set current but does not repaint over the historical one.
+      if (!_historical) renderFeatures(_liveFeatures);
       return true;
 
     } catch (e) {
@@ -254,6 +199,25 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
       _lastError = 'USGS network error';
       return false;
     }
+  },
+
+  /**
+   * Draw a past window from the time slider (USGS events, measured), in place
+   * of the live feed. `features` are USGS GeoJSON features already cut to the
+   * window by the caller.
+   * @param {Array<object>} features
+   * @param {{endMs: number, spanMs: number}} window
+   */
+  showHistoricalEvents(features, window) {
+    _historical = { endMs: Number(window?.endMs), spanMs: Number(window?.spanMs) };
+    if (_dataSource) renderFeatures(Array.isArray(features) ? features : []);
+  },
+
+  /** Return to the live feed (the last live poll's events). */
+  showLive() {
+    if (!_historical) return;
+    _historical = null;
+    if (_dataSource) renderFeatures(_liveFeatures);
   },
 
   destroy(viewer) {
@@ -267,6 +231,8 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
     _count = 0;
     _lastUpdate = null;
     _lastError = null;
+    _liveFeatures = [];
+    _historical = null;
   },
 
   /**
@@ -307,10 +273,86 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
       count: _count,
       lastUpdate: _lastUpdate,
       error: _lastError,
+      historical: _historical ? { ..._historical } : null,
     };
   },
   };
   return layer;
+
+  /**
+   * Rebuild the discs and labels from a feature list (live or historical).
+   * Hoisted: the layer methods above call it.
+   * @param {Array<object>} features USGS GeoJSON features.
+   */
+  function renderFeatures(features) {
+    _dataSource.entities.removeAll();
+    let count = 0;
+    const overlayEntries = [];
+
+    for (const feature of features) {
+      const [lon, lat, depthKm] = feature.geometry.coordinates;
+      const mag = feature.properties.mag;
+      const place = feature.properties.place;
+      const time = feature.properties.time;
+
+      if (mag < 2.5) continue; // Skip micro-quakes
+
+      count++;
+      const baseRadius = Math.pow(2, mag) * 1000;
+      const color = depthColor(depthKm || 0);
+      const isSignificant = mag >= 5.0;
+      const fillAlpha = isSignificant ? 0.4 : 0.3;
+      const outlineAlpha = isSignificant ? 1.0 : 0.8;
+
+      const position = Cesium.Cartesian3.fromDegrees(lon, lat);
+      const stableId = feature.id || `event-${count}`;
+      _dataSource.entities.add({
+        id: `earthquake:${stableId}`,
+        position,
+        ellipse: {
+          // Static axes — see the module header. A CallbackProperty here
+          // re-tessellates the clamped ground geometry every frame.
+          semiMajorAxis: baseRadius,
+          semiMinorAxis: baseRadius,
+          material: new Cesium.ColorMaterialProperty(
+            color.withAlpha(fillAlpha)
+          ),
+          outline: true,
+          outlineColor: color.withAlpha(outlineAlpha),
+          outlineWidth: isSignificant ? 3 : 2,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        },
+        properties: {
+          // Analyst seam (additive): the USGS event id (e.g. "us7000abcd").
+          usgsId: feature.id ?? null,
+          mag,
+          place,
+          time,
+          depth: depthKm,
+        },
+      });
+      overlayEntries.push(createEarthquakeOverlayEntry({
+        id: String(stableId),
+        position,
+        magnitude: mag,
+        accent: color.toCssColorString(),
+      }));
+    }
+
+    if (_enabled) {
+      overlayHost.setEntries(
+        EARTHQUAKE_OVERLAY_SOURCE_ID,
+        selectEarthquakeOverlayCohort(overlayEntries),
+        {
+          cohortLimit: EARTHQUAKE_OVERLAY_COHORT_LIMIT,
+          collisionCapacity: EARTHQUAKE_OVERLAY_COLLISION_CAPACITY,
+          moving: false,
+        },
+      );
+    }
+    _count = count;
+    console.log(`[Data:Earthquakes] Rendered ${_count} events (M2.5+)${_historical ? ' — historical window' : ''}`);
+  }
 }
 
 const earthquakesLayer = createEarthquakesLayer();

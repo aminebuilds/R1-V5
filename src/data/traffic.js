@@ -161,6 +161,8 @@ let _enabled = false;
 let _preRenderRemover = null;
 /** @type {Function|null} Disposer returned by camera.changed event subscription */
 let _cameraRemover = null;
+/** @type {Function|null} Disposer returned by camera.moveEnd event subscription */
+let _moveEndRemover = null;
 /** @type {ReturnType<typeof setTimeout>|null} Debounce timer for camera-change fetch */
 let _fetchTimeout = null;
 /** @type {{south:number,west:number,north:number,east:number}|null} Last fetched clamped bounds */
@@ -2273,6 +2275,17 @@ const trafficLayer = {
     _prevPercentageChanged = viewer.camera.percentageChanged;
     viewer.camera.percentageChanged = 0.05;
 
+    // Safety net for docs/KNOWN-ISSUES.md "city jumps": `changed`'s 5%
+    // threshold can stop firing before a flyTo has FULLY settled — its last
+    // qualifying tick can land while altitude is still easing in, which
+    // clears dots (branch 1 of onCameraChanged) and returns without arming a
+    // reload, and nothing else re-fires at the true resting position.
+    // moveEnd is Cesium's own "the camera is now at rest" signal, so re-running
+    // the same check there catches exactly that gap. onCameraChanged's own
+    // overlap/center-shift gate makes this a no-op on an ordinary settle where
+    // `changed` already scheduled the right fetch.
+    _moveEndRemover = viewer.camera.moveEnd.addEventListener(onCameraChanged);
+
     // Kick off initial viewport check
     onCameraChanged();
 
@@ -2326,6 +2339,10 @@ const trafficLayer = {
     }
 
     viewer.camera.changed.removeEventListener(onCameraChanged);
+    if (_moveEndRemover) {
+      _moveEndRemover();
+      _moveEndRemover = null;
+    }
     // Restore the camera's global percentageChanged so other layers/listeners
     // keep their expected sensitivity.
     if (_prevPercentageChanged != null) {

@@ -71,6 +71,11 @@ must be up for the last one) — all three must stay green, per CONTRIBUTING.md.
   self-contained data layer per file (`init/enable/disable/update/destroy`).
   `src/portfolio/` — the commercial engines (sites, competitors, gap model,
   fuel price, plays), each a pure async function with a typed return.
+  `src/storeAgent/` — one store's POS, loyalty, campaign and offer surface.
+  **Read [`src/storeAgent/storeLedger.js`](src/storeAgent/storeLedger.js)'s
+  header before touching anything here**: it is a deterministic simulation of
+  a PAR-class stack, not a live feed, and it must not be pointed at a paying
+  operator's console or blended into a rollup that carries measured feeds.
   `src/ontology/` — industry lenses and the intent engine.
   `src/voice/` — Realtime voice tool declarations + client execution.
   `src/styles/` — GLSL post-process visual styles.

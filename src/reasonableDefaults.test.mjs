@@ -77,13 +77,11 @@ test('first run opens with a subtle scope feather, at every surface that decides
   assert.equal(getScopeMaskFeather(), 0.11,
     'and the live module starts there, not merely documents it');
 
-  // The slider and its readout are the same default rendered as markup — a
-  // fresh boot applies no restore, so a stale value here would show one number
-  // over a mask drawn at another.
-  assert.match(indexHtml, /id="scope-feather-slider"[^>]*\svalue="11"/,
-    'index.html: the feather slider ships at 11');
-  assert.match(indexHtml, /id="scope-feather-value"[^>]*>11%</,
-    'index.html: and its readout agrees with the handle');
+  // The scope toggle and feather slider were removed from the HUD on
+  // 2026-11-13 (the mask is no longer installed), so there is no markup left
+  // to pin — assert it stays gone rather than half-returning.
+  assert.doesNotMatch(indexHtml, /id="scope-(toggle|feather-slider)"/,
+    'index.html: the scope controls stay removed');
 
   // The link this session generates must describe the mask this session draws,
   // for the window before the first _syncShareState.
@@ -110,8 +108,6 @@ test('the subtle default did not weaken the feather control, and 0 is still reac
   // The cheap way to move a default would be to nerf the control. Prove the
   // slider still spans its full range and the geometry is still DERIVED from
   // the ratio — a check that would pass vacuously if it only ever saw one value.
-  assert.match(indexHtml, /id="scope-feather-slider"[^>]*\smin="0"[^>]*\smax="100"/,
-    'the slider still offers the whole range');
   const previous = getScopeMaskFeather();
   try {
     for (const ratio of [0.35, 0.7, 1]) {

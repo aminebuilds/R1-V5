@@ -21,11 +21,11 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 40-tool inventory', () => {
+test('Realtime schema exposes the authoritative 53-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 40);
+  assert.equal(tools.length, 53);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 40, 'tool names are unique');
+  assert.equal(new Set(names).size, 53, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
@@ -34,6 +34,34 @@ test('Realtime schema exposes the authoritative 40-tool inventory', () => {
   // business doing?" — are the questions the console exists to answer.
   assert.ok(names.includes('get_view_health'));
   assert.ok(names.includes('get_portfolio_health'));
+  // The conversational onboarding arc: identify the operator's business,
+  // sweep its network at region scale, take them to the supply risk, bring
+  // them home. Spoken-first — none of these require the SITES panel.
+  assert.ok(names.includes('onboard_business'));
+  assert.ok(names.includes('discover_network'));
+  assert.ok(names.includes('inspect_chokepoint'));
+  assert.ok(names.includes('return_to_portfolio'));
+  // The store agent. These replaced a remote `mcp`-type tool pointed at an
+  // external POS/loyalty server: the capability is now in-process function
+  // tools, which means it is covered by these pins, it flows through the
+  // explain bus and draws a board, and nothing is handed to OpenAI's
+  // infrastructure to call on the operator's behalf.
+  for (const name of [
+    'get_store_performance', 'get_store_pulse', 'get_member_intelligence',
+    'get_campaign_performance', 'recommend_offer', 'create_offer', 'deploy_offer',
+  ]) {
+    assert.ok(names.includes(name), `${name} must be in the shipped inventory`);
+  }
+  // Creating an offer and publishing it are two decisions, and the schema is
+  // where that separation is load-bearing: one tool builds, another pushes.
+  assert.ok(
+    /STAGES the offer only/.test(tools.find((tool) => tool.name === 'create_offer').description),
+    'create_offer must tell the model it does not publish',
+  );
+  assert.ok(
+    /CANNOT be recalled/.test(tools.find((tool) => tool.name === 'deploy_offer').description),
+    'deploy_offer must tell the model a sent push is irreversible',
+  );
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -174,6 +202,16 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   // Last re-derived for the R.1 rename: every tool description carrying the old
   // product name was rewritten. No tool was added, removed, or given different
   // parameters, so the 21-tool inventory below is unchanged.
+  //
+  // The conversational-onboarding build then added four tools and rewrote
+  // activate_network's description. They are listed below rather than left to
+  // inflate `unchanged` — which is the point of this test: the digest still
+  // covers all 21 tools that build did NOT touch, so an accidental edit to one
+  // of them still fails here.
+  //
+  // The retail-intelligence orchestration build added two more new tools,
+  // get_local_news and get_full_insight — also listed here rather than left
+  // to inflate `unchanged`, so the 21-tool digest below is still unaffected.
   const TOUCHED = new Set([
     'set_context_mode',
     'control_cockpit',
@@ -195,6 +233,25 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'toggle_competitive_heatmap',
     'get_weather',
     'control_weather_effects',
+    // New in the conversational-onboarding build.
+    'onboard_business',
+    'discover_network',
+    'inspect_chokepoint',
+    'return_to_portfolio',
+    // New in the retail-intelligence orchestration build.
+    'get_local_news',
+    'get_full_insight',
+    // New in the store-agent build, which retired the remote par_intelligence
+    // MCP tool. Listed here rather than left to inflate `unchanged`, so the
+    // 21-tool digest below still covers every tool that build did NOT touch
+    // — and the digest being unmoved is the proof that it touched none.
+    'get_store_performance',
+    'get_store_pulse',
+    'get_member_intelligence',
+    'get_campaign_performance',
+    'recommend_offer',
+    'create_offer',
+    'deploy_offer',
   ]);
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))

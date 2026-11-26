@@ -14,6 +14,7 @@
 import { searchBusinessSites } from './businessSearch.js';
 import { loadPortfolio } from './portfolioStore.js';
 import { haversineMeters, fetchSiteTraffic } from './siteTraffic.js';
+import { selectPlays } from './playLibrary.js';
 
 /** Default competitor category pairings if not explicitly specified */
 export const DEFAULT_COMPETITOR_MAP = {
@@ -102,6 +103,17 @@ export function scoreSiteVsCompetitors(site, competitorSites, flow = null) {
       ? 'Contested'
       : 'Saturated';
 
+  // Nearest few competitors worth fetching a live traffic reading for. Capped
+  // at 3 to bound the extra TomTom round trips this triggers downstream.
+  const nearbyForTraffic = within3km
+    .slice()
+    .sort((a, b) => a.distM - b.distM)
+    .slice(0, 3)
+    .map((c) => ({
+      id: c.id, name: c.name, brand: c.brand, address: c.address,
+      lat: c.lat, lon: c.lon, distM: Math.round(c.distM),
+    }));
+
   return {
     siteId: site.id,
     siteName: site.name,
@@ -117,9 +129,88 @@ export function scoreSiteVsCompetitors(site, competitorSites, flow = null) {
     accessFriction,
     dominanceScore,
     status,
+    nearbyForTraffic,
     // Counted competitors at measured distances. The dominance weighting is a
     // convention, not a fitted coefficient.
     confidence: 'measured-density',
+  };
+}
+
+/**
+ * Compare a site's own live road congestion against its nearest competitors'.
+ *
+ * Both readings come from the same TomTom flow source as the site's own
+ * `accessFriction` — this is road congestion on each corridor, not footfall.
+ * A competitor's segment reading higher than the site's own is a real,
+ * measured fact about passing traffic; it is not evidence about who is
+ * getting more customers, and the play this feeds (`playLibrary.js`) is
+ * worded to keep that distinction rather than imply one.
+ *
+ * @param {object} breakdown One entry from `scoreSiteVsCompetitors`'s output.
+ * @param {{signal?: AbortSignal}} [opts]
+ * @returns {Promise<{
+ *   evaluated: number, covered: number, leadingCompetitor: object|null,
+ *   entries: object[], confidence: string, readout: string
+ * }>}
+ */
+export async function compareSiteTrafficToCompetitors(breakdown, { signal } = {}) {
+  const candidates = breakdown?.nearbyForTraffic || [];
+  if (!Number.isFinite(breakdown?.trafficLevel)) {
+    return {
+      evaluated: 0, covered: 0, leadingCompetitor: null, entries: [],
+      confidence: 'unavailable',
+      readout: 'COMPETITOR TRAFFIC — this site has no live flow reading of its own; comparison unavailable.',
+    };
+  }
+  if (candidates.length === 0) {
+    return {
+      evaluated: 0, covered: 0, leadingCompetitor: null, entries: [],
+      confidence: 'unavailable',
+      readout: 'COMPETITOR TRAFFIC — no mapped competitor within 3 km to compare.',
+    };
+  }
+
+  const readings = await Promise.all(candidates.map(async (c) => {
+    try {
+      const r = await fetchSiteTraffic(c.lat, c.lon, { signal });
+      return { ...c, flow: r?.status === 'ready' ? r : null };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      return { ...c, flow: null };
+    }
+  }));
+
+  const entries = readings.map((r) => ({
+    name: r.name,
+    brand: r.brand,
+    address: r.address,
+    distM: r.distM,
+    trafficLevel: r.flow ? r.flow.trafficLevel : null,
+    roadType: r.flow ? r.flow.roadType : null,
+    closure: r.flow ? r.flow.closure : null,
+    // Percentage-point delta on the 0-1 congestion scale: positive means the
+    // competitor's corridor is measurably busier than this site's own.
+    deltaPct: r.flow ? Math.round((r.flow.trafficLevel - breakdown.trafficLevel) * 100) : null,
+  }));
+
+  const covered = entries.filter((e) => Number.isFinite(e.deltaPct));
+  const leadingCompetitor = covered.length
+    ? covered.reduce((a, b) => (b.deltaPct > a.deltaPct ? b : a))
+    : null;
+
+  const readout = covered.length === 0
+    ? `COMPETITOR TRAFFIC — evaluated ${entries.length} nearby competitor corridor(s); none had live TomTom coverage.`
+    : leadingCompetitor.deltaPct > 0
+      ? `COMPETITOR TRAFFIC — ${leadingCompetitor.name} (${leadingCompetitor.distM} m) is showing ${leadingCompetitor.deltaPct} pts higher live road congestion than this site. Road traffic only, not a footfall measurement.`
+      : `COMPETITOR TRAFFIC — this site's own live congestion is at or above its ${covered.length} nearest measured competitor(s). No traffic-advantage signal in a competitor's favor.`;
+
+  return {
+    evaluated: entries.length,
+    covered: covered.length,
+    leadingCompetitor,
+    entries,
+    confidence: covered.length ? 'measured-flow' : 'unavailable',
+    readout,
   };
 }
 
@@ -173,20 +264,28 @@ export async function analyzeCompetitivePosition(
     ? competitorNames
     : inferCompetitors(resolvedBrand);
 
-  const competitorSites = [];
-  for (const compName of targetCompetitors) {
+  // Each competitor name is its own Places+Overpass round trip (up to
+  // Overpass's own 8s timeout) — searching them one at a time serially could
+  // turn a 2-3 name list into 15-25s of wall-clock time the operator just
+  // watches a spinner for. Same requests, same results, run concurrently.
+  const competitorResults = await Promise.all(targetCompetitors.map(async (compName) => {
     try {
       const res = await searchBusinessSites(compName, { biasLat, biasLon, signal });
-      if (res?.sites?.length) {
-        for (const s of res.sites) {
-          competitorSites.push({
-            ...s,
-            brand: compName,
-            isCompetitor: true,
-          });
-        }
-      }
-    } catch {}
+      return { compName, sites: res?.sites || [] };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      return { compName, sites: [] };
+    }
+  }));
+  const competitorSites = [];
+  for (const { compName, sites } of competitorResults) {
+    for (const s of sites) {
+      competitorSites.push({
+        ...s,
+        brand: compName,
+        isCompetitor: true,
+      });
+    }
   }
 
   // Deduplicate competitor sites
@@ -248,9 +347,31 @@ export async function analyzeCompetitivePosition(
     }
   }));
 
-  const siteBreakdowns = clientSites
+  const baseBreakdowns = clientSites
     .map((site, i) => scoreSiteVsCompetitors(site, dedupedComps, flows[i]))
     .filter(Boolean);
+
+  // Second pass, concurrent: live traffic on each site's own nearest few
+  // competitor corridors, plus any play the comparison triggers. Kept as a
+  // separate pass because it is its own round of TomTom calls per site.
+  const siteBreakdowns = await Promise.all(baseBreakdowns.map(async (breakdown) => {
+    const competitorTraffic = await compareSiteTrafficToCompetitors(breakdown, { signal });
+    const leading = competitorTraffic.leadingCompetitor;
+    const signals = {
+      competitorTrafficDeltaPct: leading?.deltaPct ?? null,
+      competitorDistanceM: leading?.distM ?? null,
+      categoryText: `${breakdown.siteName || ''}`,
+    };
+    const plays = selectPlays(signals).map(({ play }) => ({
+      id: play.id,
+      name: play.name,
+      action: play.action,
+      rationale: play.rationale,
+      expectedLiftPct: play.expectedLiftPct,
+      requiresApproval: play.requiresApproval,
+    }));
+    return { ...breakdown, competitorTraffic, plays };
+  }));
 
   const totalLocations = clientSites.length + dedupedComps.length;
   const marketSharePct = Math.round((clientSites.length / totalLocations) * 100);
@@ -263,8 +384,9 @@ export async function analyzeCompetitivePosition(
   const topSite = [...siteBreakdowns].sort((a, b) => b.dominanceScore - a.dominanceScore)[0];
   const uncontestedCount = siteBreakdowns.filter((s) => s.dominanceScore >= 75).length;
   const flowCoverage = flows.filter(Boolean).length;
+  const trafficDisadvantageCount = siteBreakdowns.filter((s) => s.plays.length > 0).length;
 
-  const readout = `COMPETITIVE — ${clientSites.length} ${resolvedBrand} location${clientSites.length === 1 ? '' : 's'} against ${dedupedComps.length} mapped competitor site${dedupedComps.length === 1 ? '' : 's'} (${targetCompetitors.join(', ')}). Location share of mapped set: ${marketSharePct}%. Mean territorial score ${avgDominance}/100; ${uncontestedCount} uncontested${topSite ? `, strongest ${topSite.siteName}` : ''}. Live road flow resolved for ${flowCoverage}/${clientSites.length}.`;
+  const readout = `COMPETITIVE — ${clientSites.length} ${resolvedBrand} location${clientSites.length === 1 ? '' : 's'} against ${dedupedComps.length} mapped competitor site${dedupedComps.length === 1 ? '' : 's'} (${targetCompetitors.join(', ')}). Location share of mapped set: ${marketSharePct}%. Mean territorial score ${avgDominance}/100; ${uncontestedCount} uncontested${topSite ? `, strongest ${topSite.siteName}` : ''}. Live road flow resolved for ${flowCoverage}/${clientSites.length}${trafficDisadvantageCount ? `; ${trafficDisadvantageCount} site${trafficDisadvantageCount === 1 ? '' : 's'} showing a competitor traffic advantage` : ''}.`;
 
   return {
     success: true,

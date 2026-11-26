@@ -36,6 +36,13 @@ export const DATA_CREDITS = [
       '(non-commercial)',
   },
   {
+    key: 'faa-nas-status',
+    html:
+      'US airspace programs: FAA NAS Status — ' +
+      '<a href="https://nasstatus.faa.gov" target="_blank" rel="noopener">nasstatus.faa.gov</a> ' +
+      '(US public domain)',
+  },
+  {
     key: 'adsblol',
     html:
       'Military flights, aircraft traces &amp; bounded regional flight fallback: ' +

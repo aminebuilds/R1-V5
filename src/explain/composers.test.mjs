@@ -13,12 +13,15 @@ import { NO_VALUE, validateBlocks } from './blocks.js';
 import {
   COMPOSED_ACTIONS,
   composeAnalyst,
+  composeChokepointIntel,
   composeCompetitors,
   composeCoolOff,
   composeForAction,
   composeFuelOutlook,
+  composeFullInsight,
   composeGeneric,
   composeHealth,
+  composeLocalNews,
   composePending,
   composeTraffic,
   stripReadoutPrefix,
@@ -303,6 +306,73 @@ test('price: with no vessel layer the risk input is reported as absent', () => {
   assert.match(row.source, /not loaded/);
 });
 
+/** A ready chokepoint result, shaped as `inspect_chokepoint` returns. */
+function chokepointResult({ withIndex = true } = {}) {
+  return {
+    ok: true,
+    action: 'inspect_chokepoint',
+    chokepoint: 'hormuz',
+    gateName: 'Strait of Hormuz',
+    status: 'ready',
+    tankersInGate: 7,
+    vesselsInGate: 40,
+    unclassifiedInGate: 30,
+    vesselsObserved: 11000,
+    measurement: 'Instantaneous count of live AIS contacts inside the gate box, not a transit rate. 40 contacts in the gate, 7 identified as tankers.',
+    disruptionIndex: withIndex
+      ? {
+        index: 62,
+        level: 'elevated',
+        available: ['transits', 'volatility'],
+        missing: ['eventVolume', 'eventTone'],
+        readout: 'DISRUPTION — index 62/100 (elevated) from 2 of 4 components; missing eventVolume, eventTone.',
+      }
+      : { index: null, level: 'unavailable', available: [], missing: ['transits', 'eventVolume', 'eventTone', 'volatility'], readout: 'DISRUPTION — no component inputs available; index not computed.' },
+  };
+}
+
+test('chokepoint: no AIS coverage in the gate is a gap, never a zero', () => {
+  const blocks = composeChokepointIntel({
+    ok: false,
+    action: 'inspect_chokepoint',
+    gateName: 'Strait of Hormuz',
+    status: 'awaiting-vessel-feed',
+    vesselsObserved: 2000,
+    error: 'The AIS feed has not delivered any contacts inside Strait of Hormuz yet.',
+  });
+  const gap = find(blocks, 'gap');
+  assert.ok(gap, 'no coverage must render as a gap block');
+  assert.match(gap.reason, /has not delivered/);
+  assert.equal(find(blocks, 'readouts'), null);
+});
+
+test('chokepoint: a ready gate reports measured counts and the disruption chain', () => {
+  const blocks = composeChokepointIntel(chokepointResult());
+  assert.equal(find(blocks, 'verdict').kind, 'measured');
+
+  const readouts = find(blocks, 'readouts').items;
+  assert.equal(readouts.find((r) => r.label === 'Tankers in gate').value, '7');
+  assert.equal(readouts.find((r) => r.label === 'Tankers in gate').kind, 'measured');
+
+  const chain = find(blocks, 'chain');
+  assert.equal(chain.stages[0].state, 'met');
+  assert.match(chain.stages[2].value, /62\/100/);
+  assert.equal(chain.stages[2].state, 'met');
+
+  const note = find(blocks, 'note');
+  assert.match(note.text, /what will fuel cost/);
+});
+
+test('chokepoint: with no scoreable index the chain stays pending, not a fabricated zero', () => {
+  const blocks = composeChokepointIntel(chokepointResult({ withIndex: false }));
+  const chain = find(blocks, 'chain');
+  assert.equal(chain.stages[2].state, 'pending');
+  assert.equal(chain.stages[2].value, NO_VALUE);
+  const note = find(blocks, 'note');
+  assert.match(note.text, /Not enough data/);
+  assert.equal(note.tone, 'caution');
+});
+
 test('competitors: an empty search is a real answer, not a placeholder set', () => {
   const blocks = composeCompetitors({
     success: false,
@@ -402,6 +472,85 @@ test('composeForAction routes every advertised action and falls back safely', ()
   }
 });
 
+test('local news: an empty result is a gap, never a silent empty board', () => {
+  const blocks = composeLocalNews({ ok: false, error: 'no-location', articles: [] });
+  const gap = find(blocks, 'gap');
+  assert.ok(gap);
+  assert.equal(find(blocks, 'ranked'), null);
+});
+
+test('local news: Google News RSS carries its non-commercial licensing caveat', () => {
+  const blocks = composeLocalNews({
+    ok: true,
+    newsSource: 'Google News RSS',
+    place: { label: 'Des Moines, Iowa' },
+    readout: 'LOCAL NEWS — 2 recent items near Des Moines, Iowa, via Google News RSS.',
+    articles: [
+      { title: 'Fuel prices tick up', domain: 'example.com', publishedAt: '2026-09-19T00:00:00Z' },
+      { title: 'Road work on I-80', domain: 'example.org', publishedAt: null },
+    ],
+  });
+  assert.deepEqual(find(blocks, 'ranked').rows.map((row) => row.label), ['Fuel prices tick up', 'Road work on I-80']);
+  assert.ok(all(blocks, 'note').some((block) => /non-commercial use only/.test(block.text)));
+});
+
+test('local news: GDELT source carries no licensing caveat', () => {
+  const blocks = composeLocalNews({
+    ok: true,
+    newsSource: 'GDELT fallback',
+    readout: 'LOCAL NEWS — 1 recent item, via GDELT fallback.',
+    articles: [{ title: 'Regional supply update', domain: 'example.net', publishedAt: null }],
+  });
+  assert.equal(all(blocks, 'note').length, 0);
+});
+
+test('full insight: no data in scope still produces a board with a stated gap, never a fabricated summary', () => {
+  const blocks = composeFullInsight({ ok: true, competitors: {}, health: {}, price: { status: 'unavailable' }, busyness: [], news: {}, plays: [] });
+  const verdict = find(blocks, 'verdict');
+  assert.match(verdict.text, /Not enough measured data/);
+  const readoutValues = find(blocks, 'readouts').items.map((item) => item.value);
+  assert.ok(readoutValues.includes(NO_VALUE));
+});
+
+test('full insight: stitches competitors, price, busyness, and plays into one board with map keys', () => {
+  const blocks = composeFullInsight({
+    ok: true,
+    competitors: {
+      success: true,
+      clientSitesCount: 2,
+      competitorSitesCount: 5,
+      marketSharePct: 29,
+      siteBreakdowns: [
+        { siteId: 's1', siteName: 'Store 1', dominanceScore: 70, competitorsWithin1km: 1, lat: 41.1, lon: -93.1 },
+        { siteId: 's2', siteName: 'Store 2', dominanceScore: 40, competitorsWithin1km: 3, lat: 41.2, lon: -93.2 },
+      ],
+    },
+    health: { traffic: { meanCongestionScore: 62 } },
+    price: {
+      status: 'ready',
+      anchor: { value: 3.219, unit: '$/gal' },
+      forecast: { ok: true, weeks: 2, anchor: 3.219, points: [{ week: 1, central: 3.25, low: 3.2, high: 3.3 }] },
+    },
+    busyness: [
+      { siteId: 's1', siteName: 'Store 1', score: 72, confidence: 'modelled' },
+      { siteId: 's2', siteName: 'Store 2', score: null, confidence: 'unavailable' },
+    ],
+    news: { articles: [{ title: 'Local road closure', domain: 'example.com' }], newsSource: 'GDELT fallback' },
+    plays: [{ id: 'play:competitor-traffic-advantage', name: 'Intercept traffic', action: 'Push a loyalty offer', expectedLiftPct: { value: null }, requiresApproval: true }],
+  });
+
+  const ranked = find(blocks, 'ranked');
+  assert.deepEqual(ranked.rows.map((row) => row.focus), [
+    { id: 's1', lat: 41.1, lon: -93.1, label: 'Store 1' },
+    { id: 's2', lat: 41.2, lon: -93.2, label: 'Store 2' },
+  ]);
+  assert.ok(find(blocks, 'band'));
+  assert.ok(find(blocks, 'multiples'));
+  assert.ok(find(blocks, 'plays'));
+  const { ok, problems } = validateBlocks(blocks);
+  assert.ok(ok, problems.join('; '));
+});
+
 test('the pending header lands before any engine has answered', () => {
   const blocks = composePending({ question: 'How is this view doing?', scope: 'in view', action: 'get_view_health' });
   assert.equal(blocks.length, 1);
@@ -415,6 +564,8 @@ test('every composed board is structurally valid with unique block ids', () => {
     composeHealth({ siteCount: 0 }, { action: 'get_view_health' }),
     composeFuelOutlook(priceResult()),
     composeFuelOutlook({ status: 'no-key', readout: 'PRICE — no key.' }),
+    composeChokepointIntel(chokepointResult()),
+    composeChokepointIntel({ status: 'awaiting-vessel-feed', gateName: 'Strait of Hormuz', vesselsObserved: 0 }),
     composeTraffic({ status: 'no-key' }),
     composeAnalyst({ ok: false, error: 'x' }),
     composeGeneric('get_weather', { ok: true, readout: 'WEATHER — fine.' }),

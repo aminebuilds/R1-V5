@@ -34,6 +34,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { requestWorldFocus } from '../worldFocus.js';
+import { formatCursorUtc } from '../timeline/timeCursor.js';
 
 /** Same-origin live-fires proxy (vite.config.js firmsProxy — key stays server-side). */
 const FIRMS_API_URL = '/api/firms';
@@ -147,6 +148,10 @@ export function createFirmsHeatmapLayer({
   let _error = null;
   let _fires = [];
   let _firesByFrp = [];
+  /** The last live payload's records, kept while a past window is drawn. */
+  let _liveFires = [];
+  /** `{endMs, spanMs}` while the time slider holds a past window, else null. */
+  let _historical = null;
   let _count = 0;
   let _cellCount = 0;
   let _lastUpdate = null;
@@ -271,6 +276,8 @@ export function createFirmsHeatmapLayer({
       clearSelectedEntityContextForLayer(id);
       _fires = [];
       _firesByFrp = [];
+      _liveFires = [];
+      _historical = null;
       _cellCacheByGrid.clear();
       _count = 0;
       _cellCount = 0;
@@ -303,7 +310,9 @@ export function createFirmsHeatmapLayer({
       const now = Date.now();
       const staleText = _lastUpdate ? `STALE · cached ${formatAge(now - _lastUpdate) || '<1h'}` : 'STALE';
       let loadingLabel = '';
-      if (_loading) {
+      if (_historical) {
+        loadingLabel = `HISTORY · 24 H TO ${formatCursorUtc(_historical.endMs)}`;
+      } else if (_loading) {
         loadingLabel = _fires.length ? 'refreshing...' : 'loading...';
       } else if (_keyRequired) {
         loadingLabel = 'KEY REQUIRED';
@@ -323,7 +332,33 @@ export function createFirmsHeatmapLayer({
         keyRequired: _keyRequired,
         error: _keyRequired ? 'KEY REQUIRED' : (_stale ? staleText : _error),
         loadingLabel,
+        historical: _historical ? { ..._historical } : null,
       };
+    },
+
+    /**
+     * Draw a past window from the time slider in place of the live set.
+     * `fires` are measured FIRMS detections in firmsAdapt shape, already cut
+     * to the window by the caller (src/timeline/firmsHistory.js).
+     * @param {Array<object>} fires
+     * @param {{endMs: number, spanMs: number}} window
+     */
+    showHistoricalFires(fires, window) {
+      if (_destroyed) return;
+      _historical = { endMs: Number(window?.endMs), spanMs: Number(window?.spanMs) };
+      applyFireSet(Array.isArray(fires) ? fires : []);
+    },
+
+    /** Return to the last live payload. */
+    showLive() {
+      if (_destroyed || !_historical) return;
+      _historical = null;
+      applyFireSet(_liveFires);
+    },
+
+    /** True while a past window from the time slider is on the map. */
+    isHistorical() {
+      return Boolean(_historical);
     },
 
     /**
@@ -441,35 +476,48 @@ export function createFirmsHeatmapLayer({
       _keyRequired = false;
       _error = null;
       _stale = Boolean(payload?.stale);
-      const previousSelection = _selectedFire;
-      _selectedFire = null;
-      _fires = adaptFirmsRecords(payload?.fires);
-      _cellCacheByGrid.clear(); // aggregation is per-dataset — new fires, new cells
-      _firesByFrp = [..._fires].sort((a, b) => b.frp - a.frp);
-      _count = _fires.length;
+      _liveFires = adaptFirmsRecords(payload?.fires);
       // Data age, not response age: a stale proxy payload truthfully reads old.
       _lastUpdate = Number.isFinite(payload?.fetchedAt) ? payload.fetchedAt : Date.now();
-      // Settle the previous selection BEFORE the LOD rebuild. renderCurrentLod
-      // runs refreshContextRegistrations(), which deletes every context record
-      // not in the new top-N — including the one the store still points at.
-      // Clearing after that deletion fails the ownership guard inside
-      // clearSelectedEntityContextForLayer and emits nothing at all, so an
-      // eviction-aware readout never hears that its subject is gone.
-      const reselected = findMatchingFire(previousSelection);
-      if (!reselected && previousSelection) {
-        // The selected detection is not in the new payload: it left the feed
-        // rather than being deselected. Eviction-aware readouts hold their
-        // last-known values for this instead of tearing down.
-        clearSelectedEntityContextForLayer(id, { evicted: true });
-      }
-      renderCurrentLod(true);
-      if (reselected) selectFire(reselected);
+      // A past window from the time slider stays on screen; the live set is
+      // kept current underneath it and comes back on showLive().
+      if (!_historical) applyFireSet(_liveFires);
     } catch (error) {
       console.warn(`[Data:${id}] FIRMS live load failed:`, error);
       _error = 'live feed unavailable';
     } finally {
       _loading = false;
     }
+  }
+
+  /**
+   * Swap the rendered detection set (live payload or a historical window) and
+   * rebuild the current LOD. A click-selected fire survives the swap when the
+   * same detection (lat/lon/acqMs) is still present.
+   * @param {Array<object>} fires firmsAdapt-shaped records.
+   */
+  function applyFireSet(fires) {
+    const previousSelection = _selectedFire;
+    _selectedFire = null;
+    _fires = fires;
+    _cellCacheByGrid.clear(); // aggregation is per-dataset — new fires, new cells
+    _firesByFrp = [..._fires].sort((a, b) => b.frp - a.frp);
+    _count = _fires.length;
+    // Settle the previous selection BEFORE the LOD rebuild. renderCurrentLod
+    // runs refreshContextRegistrations(), which deletes every context record
+    // not in the new top-N — including the one the store still points at.
+    // Clearing after that deletion fails the ownership guard inside
+    // clearSelectedEntityContextForLayer and emits nothing at all, so an
+    // eviction-aware readout never hears that its subject is gone.
+    const reselected = findMatchingFire(previousSelection);
+    if (!reselected && previousSelection) {
+      // The selected detection is not in the new set: it left the feed (or
+      // the window) rather than being deselected. Eviction-aware readouts
+      // hold their last-known values for this instead of tearing down.
+      clearSelectedEntityContextForLayer(id, { evicted: true });
+    }
+    renderCurrentLod(true);
+    if (reselected) selectFire(reselected);
   }
 
   /**
@@ -495,7 +543,10 @@ export function createFirmsHeatmapLayer({
    *   its freshly-added sprites, an early-out does not.
    */
   function renderCurrentLod(force = false) {
-    if (!_dataSource || !_fires.length || !_viewer) return false;
+    // A forced render of an EMPTY set still runs: it clears the previous
+    // sprites, so an hour with no detections (or a window the time slider
+    // moved off) never leaves the last picture on screen.
+    if (!_dataSource || !_viewer || (!_fires.length && !force)) return false;
     const lodIndex = selectLodIndex(cameraHeight());
     const lod = LOD_LEVELS[lodIndex];
     const viewRect = computeViewRect();

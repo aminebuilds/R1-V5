@@ -3,6 +3,92 @@
 This changelog records public product changes. For the authoritative description
 of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md).
 
+## [Unreleased] — 2026-09-21
+
+### Added
+
+- **Time slider: the last seven days, not just now.** Open it from the clock
+  button in the top action bar, from `?time`, or parked at a moment with
+  `?at=-36h` (also `-2d`, an ISO time, or epoch ms). Drag the cursor, step an
+  hour at a time, or press play:
+  - **Fires (NASA FIRMS)** and **earthquakes (USGS, M2.5+)** redraw the 24 h
+    ending at the cursor, the same window they show live, so "now" on the
+    slider is exactly the live map.
+  - Trend lanes above the scrubber show rolling 24 h fire detections and quake
+    events in the current view, and GDELT news-coverage share at Hormuz,
+    Malacca, Suez and Bab el-Mandeb.
+  - Every lane is measured. A stretch no source could fetch is hatched and
+    reads NO DATA, never zero. A rate-limited feed reads UNAVAILABLE.
+  - Layers with no history (flights, vessels, traffic and the rest) stay live,
+    and while the cursor is parked the strip names them. Closing the strip
+    returns the map to live.
+
+  Fire history needs `FIRMS_MAP_KEY`. The server backfills nine days on first
+  open (about a minute) and keeps them in `.r1-cache/firms-history/`.
+
+- **US airspace brief, live.** Open it from `BRIEFS · US AIRSPACE` on the
+  explain board, from `?airspace`, or by asking about the FAA, a ground stop
+  or cancelled flights. The board shows:
+  - FAA ground stops, delay programs, delays and closures from the public NAS
+    Status feed.
+  - US aircraft airborne, sampled from OpenSky every ten minutes into a
+    persisted timeline.
+  - US departures per half hour on the event day against the day before, from
+    OpenSky's flight table.
+  - A sourced record of the 2026-11-13 nationwide ground stop.
+  - Linked live coverage.
+
+  The timeline scrubs: drag across it and every lane, the FAA programs at
+  that moment and the reported event in effect read out together. The board
+  refreshes in place each minute while open, keeping its scroll position and
+  cursor. Every figure is labelled measured or unavailable; a stale traffic
+  count is dated, never shown as current. `R1_AIRSPACE_SAMPLE_MIN` sets the
+  sampler cadence; `0` turns it off.
+
+- **The store agent — one store's POS, loyalty, campaigns and screens.** The
+  console can now answer store-level operating questions and act on them:
+  trading performance over a period with a day-by-day series and daypart and
+  category movement; a live transaction pulse that reports a dip *with* a
+  ranked attribution of what is behind it; the loyalty file cut into
+  behavioural segments, one enriched member profile, or the identity bridge
+  that collapses an anonymous transaction onto a known member; the campaign
+  book showing every loyalty offer running with what it has done beside what
+  it was forecast to do; an offer recommendation ranked against live
+  conditions; and offer creation and publication to the forecourt canopy,
+  dispenser toppers, in-store menu boards, the mobile app, the register
+  prompt and the digital receipt.
+- **The advertisement is drawn on screen.** Creating an offer composes the
+  creative for each requested surface and the board renders it — a real ad,
+  laid out per screen rather than one rectangle rescaled, because a canopy
+  read at 40 mph and an app card read in the hand are different problems.
+- **Creating and publishing are two decisions.** `create_offer` stages and
+  draws; `deploy_offer` publishes. A mobile-app deployment sends a push, and
+  the board and the narration both say plainly that a sent push cannot be
+  recalled.
+- Seven new voice tools (`get_store_performance`, `get_store_pulse`,
+  `get_member_intelligence`, `get_campaign_performance`, `recommend_offer`,
+  `create_offer`, `deploy_offer`), each reachable by typing as well —
+  the mic stays optional, as everywhere else.
+- Five new explain-board block types: `series` (ordered time bars with the
+  prior period as a ghost behind), `roster` (members and segments),
+  `campaigns` (measured result and modelled forecast in separate labelled
+  columns), `creative` (the advertisement), and `surfaces` (distribution
+  state, including which pushes are irreversible).
+
+### Changed
+
+- **The remote `par_intelligence` MCP tool is gone.** The Realtime session
+  used to append an `mcp`-type tool pointed at an external POS/loyalty
+  server, with a bearer token handed to OpenAI so its infrastructure could
+  call that server directly. Store capability is now served in-process by
+  [`src/storeAgent/`](src/storeAgent/) through ordinary function tools: the
+  results flow through the explain bus and draw a board, the tool schemas are
+  covered by the two existing pins, and no third party is given a credential.
+  `PAR_INTELLIGENCE_MCP_URL` and `PAR_INTELLIGENCE_MCP_API_KEY` are removed.
+- Realtime tool inventory 46 → 53. Both schema pins re-derived; the
+  companion 21-tool `unchanged` digest is unmoved, which is the evidence that
+  no existing tool definition was touched.
+
 ## [Unreleased] — 2026-09-06
 
 ### Added
@@ -27,6 +113,14 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   (`ensureActionRunner` in `src/voice/r1Actions.js`), so the console still
   answers with the mic off. A question that maps onto no capability is declined
   with the list of answerable ones rather than guessed at.
+- **Chokepoint traffic now reads as fuel-price risk.** Flying to a chokepoint
+  gate (`inspect_chokepoint`) previously returned a bare tanker count with no
+  board and no non-voice front door. It now shares the fuel outlook's
+  disruption-index assessment and gets its own board — measured tanker/vessel
+  counts plus a stage diagram showing whether that traffic fed the index and
+  what the index reads, `pending` rather than invented wherever an input is
+  missing — and can be reached by typing a question naming a strait or
+  chokepoint, not only by voice.
 
 ### Changed
 

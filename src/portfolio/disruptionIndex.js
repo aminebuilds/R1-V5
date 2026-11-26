@@ -57,8 +57,50 @@ export const CHOKEPOINTS = Object.freeze({
   }),
 });
 
-/** Vessel types that count as tanker traffic in an AIS record. */
+/** Vessel types that count as tanker traffic when the feed supplies TEXT. */
 const TANKER_PATTERN = /tanker|crude|lng|lpg|petrol|chemical/i;
+
+/**
+ * AIS numeric ship-type codes that mean "tanker" (ITU-R M.1371): 80 is the
+ * generic tanker, 81-84 the hazardous categories A-D, 85-89 reserved/no extra
+ * information. 70-79 are cargo and must NOT be counted.
+ */
+const AIS_TANKER_CODE_MIN = 80;
+const AIS_TANKER_CODE_MAX = 89;
+
+/**
+ * Does this vessel's type field identify a tanker?
+ *
+ * AISStream delivers `ShipType` as the RAW NUMERIC AIS code, so the live feed
+ * carries values like "80" and "70" — never the words "Crude Oil Tanker". The
+ * text pattern alone therefore matched nothing in production and the tanker
+ * count was structurally zero everywhere, which the unit tests missed because
+ * their fixtures used human-readable strings. Both vocabularies are accepted
+ * now: numeric for the live feed, text for any feed that supplies it.
+ *
+ * @param {unknown} shipType
+ * @returns {boolean|null} true/false, or null when the feed gave no type at all.
+ */
+export function isTankerType(shipType) {
+  if (shipType === null || shipType === undefined || shipType === '') return null;
+  const raw = String(shipType).trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) {
+    const code = Number(raw);
+    // 0 is AIS for "not available", not a vessel class.
+    if (code === 0) return null;
+    return code >= AIS_TANKER_CODE_MIN && code <= AIS_TANKER_CODE_MAX;
+  }
+  return TANKER_PATTERN.test(raw);
+}
+
+/** Is this vessel positioned inside the gate box? */
+function isInGate(vessel, gate) {
+  if (!vessel || !gate) return false;
+  const { lat, lon } = vessel;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  return lat >= gate.south && lat <= gate.north && lon >= gate.west && lon <= gate.east;
+}
 
 /**
  * Is this vessel record a tanker inside the gate?
@@ -67,22 +109,27 @@ const TANKER_PATTERN = /tanker|crude|lng|lpg|petrol|chemical/i;
  * @returns {boolean}
  */
 export function isTankerInGate(vessel, gate) {
-  if (!vessel || !gate) return false;
-  const { lat, lon } = vessel;
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-  if (lat < gate.south || lat > gate.north || lon < gate.west || lon > gate.east) return false;
-  return TANKER_PATTERN.test(String(vessel.shipType || ''));
+  if (!isInGate(vessel, gate)) return false;
+  return isTankerType(vessel.shipType) === true;
 }
 
 /**
  * Count tankers currently inside a gate.
+ *
+ * `unclassified` is part of the answer, not a footnote: most contacts in the
+ * live feed carry no ship type at all, so "3 tankers" out of 40 contacts of
+ * which 32 are untyped is a floor, and a caller that reports the count without
+ * it is overstating what was measured.
+ *
  * @param {object[]} vessels
  * @param {object} gate
- * @returns {{count: number, vessels: object[]}}
+ * @returns {{count: number, vessels: object[], inGate: number, unclassified: number}}
  */
 export function countTankersInGate(vessels, gate) {
-  const inside = (vessels || []).filter((v) => isTankerInGate(v, gate));
-  return { count: inside.length, vessels: inside };
+  const inside = (vessels || []).filter((v) => isInGate(v, gate));
+  const tankers = inside.filter((v) => isTankerType(v.shipType) === true);
+  const unclassified = inside.filter((v) => isTankerType(v.shipType) === null).length;
+  return { count: tankers.length, vessels: tankers, inGate: inside.length, unclassified };
 }
 
 /** Sample standard deviation, or null below two points. */
@@ -276,6 +323,39 @@ export function correlate(a, b, lagPeriods = 0) {
   }
   if (denA === 0 || denB === 0) return null;
   return Math.round((num / Math.sqrt(denA * denB)) * 1000) / 1000;
+}
+
+/**
+ * Build a `{current, history}` volatility input for `computeDisruptionIndex`
+ * straight from an EIA spot series already in hand — no extra network call.
+ *
+ * Walks a trailing 14-day window backward across the series in 7-day steps,
+ * calling `realisedVolatility` at each stop. The most recent stop is `current`;
+ * everything before it is `history`, the same shape every other component
+ * expects.
+ *
+ * @param {Array<{period: string, value: number}>} spotPoints
+ * @param {{window?: number, historyPoints?: number}} [opts]
+ * @returns {{current: number|null, history: number[]}}
+ */
+export function buildVolatilityHistory(spotPoints, { window = 14, historyPoints = 26 } = {}) {
+  const sorted = [...(spotPoints || [])]
+    .filter((p) => p && Number.isFinite(p.value))
+    .sort((a, b) => a.period.localeCompare(b.period));
+
+  const samples = [];
+  for (let end = sorted.length; end > window; end -= 7) {
+    const slice = sorted.slice(Math.max(0, end - window - 1), end);
+    const v = realisedVolatility(slice, window);
+    if (v !== null) samples.push(v);
+    if (samples.length >= historyPoints + 1) break;
+  }
+  // `samples` is newest-first (we walked backward); reverse for a normal
+  // oldest-first history, then pop the newest entry off as `current`.
+  samples.reverse();
+  const current = samples.length ? samples[samples.length - 1] : null;
+  const history = samples.slice(0, -1);
+  return { current, history };
 }
 
 /**

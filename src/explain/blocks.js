@@ -80,9 +80,38 @@ export const BLOCK_TYPES = Object.freeze([
   'sources',
   'gap',
   'note',
+  // Store-agent vocabulary: the operator's own transaction, member and
+  // campaign surface, plus the creative the console actually publishes.
+  'series',
+  'roster',
+  'campaigns',
+  'creative',
+  'surfaces',
+  // Airspace vocabulary: a scrubbable multi-lane timeline, linked live
+  // headlines, and a sourced event record.
+  'timeline',
+  'headlines',
+  'dossier',
 ]);
 
 const BLOCK_TYPE_SET = new Set(BLOCK_TYPES);
+
+/**
+ * An http(s) URL, normalised, or null. Links on the board come from feeds and
+ * curated records; anything else (javascript:, data:, relative) is dropped
+ * rather than rendered.
+ * @param {*} value
+ * @returns {string|null}
+ */
+export function safeLink(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Stage states in a `chain` block. */
 export const CHAIN_STATES = Object.freeze(['met', 'unmet', 'pending', 'na']);
@@ -426,6 +455,7 @@ export function sources({ items }) {
       label: String(item.label || ''),
       detail: item.detail || null,
       at: item.at || null,
+      url: safeLink(item.url),
     })),
   };
 }
@@ -455,6 +485,312 @@ export function note({ text, tone = 'dim' }) {
   return { type: 'note', text: String(text || ''), tone };
 }
 
+/* -- Store-agent blocks ---------------------------------------------------
+ * The five below carry the operator's own transaction and member surface.
+ * They obey the same two rules as everything above: an unmeasured value is
+ * null and renders as an em dash, and every block states its kind.
+ */
+
+/**
+ * An ordered run of values over time -- days of a week, hours of a shift,
+ * days of a campaign. Distinct from `ranked` because ORDER is the meaning
+ * here: re-sorting a week by size destroys the thing being looked at.
+ *
+ * `compare` is the same point in the previous period, drawn as a ghost
+ * behind the bar so a delta is visible rather than asserted.
+ *
+ * @param {{title?: string, unit?: string|null, kind?: string, points: object[], note?: string|null}} props
+ * @returns {object}
+ */
+export function series({ title = 'Over time', unit = null, kind = 'measured', points, note: footnote = null }) {
+  return {
+    type: 'series',
+    title,
+    unit,
+    kind: provenance(kind).key,
+    note: footnote,
+    points: (points || []).map((point) => ({
+      label: String(point.label || ''),
+      value: finite(point.value) ? Number(point.value) : null,
+      display: point.display === undefined || point.display === null ? NO_VALUE : String(point.display),
+      compare: finite(point.compare) ? Number(point.compare) : null,
+      deltaPct: finite(point.deltaPct) ? Number(point.deltaPct) : null,
+      tone: point.tone || 'signal',
+      // A partial bar is hatched rather than drawn solid: today at 14:40 is
+      // not a short day, it is an incomplete one, and the chart must not
+      // read as the former.
+      partial: Boolean(point.partial),
+      sub: point.sub || null,
+    })),
+  };
+}
+
+/**
+ * People and cohorts: member profiles, loyalty segments, a resolved
+ * identity. Each card is a subject with a handful of labelled stats and
+ * optional tags.
+ *
+ * @param {{title?: string, cards: object[], note?: string|null}} props
+ * @returns {object}
+ */
+export function roster({ title = 'Members', cards, note: footnote = null }) {
+  return {
+    type: 'roster',
+    title,
+    note: footnote,
+    cards: (cards || []).map((card, index) => ({
+      key: card.key || String.fromCharCode(65 + (index % 26)),
+      name: String(card.name || ''),
+      sub: card.sub || null,
+      badge: card.badge || null,
+      tone: card.tone || 'signal',
+      stats: (card.stats || []).map((stat) => ({
+        label: String(stat.label || ''),
+        value: stat.value === null || stat.value === undefined ? NO_VALUE : String(stat.value),
+        kind: provenance(stat.kind || 'measured').key,
+      })),
+      tags: (card.tags || []).map(String),
+      note: card.note || null,
+      meter: finite(card.meter) ? Number(card.meter) : null,
+    })),
+  };
+}
+
+/**
+ * Running campaigns. The one block in the vocabulary that deliberately shows
+ * two provenances in one row: what the campaign HAS DONE (measured) beside
+ * what it was FORECAST to do (modelled). Keeping them in separate columns is
+ * the entire point -- "doing well" is the comparison, and a single blended
+ * number would hide which half is which.
+ *
+ * @param {{title?: string, rows: object[], note?: string|null}} props
+ * @returns {object}
+ */
+export function campaigns({ title = 'Campaigns running', rows, note: footnote = null }) {
+  return {
+    type: 'campaigns',
+    title,
+    note: footnote,
+    rows: (rows || []).map((row, index) => ({
+      key: row.key || String.fromCharCode(65 + (index % 26)),
+      id: String(row.id || ''),
+      name: String(row.name || ''),
+      sub: row.sub || null,
+      verdict: String(row.verdict || 'on-plan'),
+      verdictLabel: String(row.verdictLabel || ''),
+      tone: row.tone || 'ghost',
+      // 0..1+ where 1 is "exactly on its forecast pace". The renderer draws
+      // the plan line at 1 so over and under are read at a glance.
+      paceRatio: finite(row.paceRatio) ? Number(row.paceRatio) : null,
+      paceDisplay: row.paceDisplay === undefined || row.paceDisplay === null ? NO_VALUE : String(row.paceDisplay),
+      measured: (row.measured || []).map((stat) => ({
+        label: String(stat.label || ''),
+        value: stat.value === null || stat.value === undefined ? NO_VALUE : String(stat.value),
+      })),
+      forecast: (row.forecast || []).map((stat) => ({
+        label: String(stat.label || ''),
+        value: stat.value === null || stat.value === undefined ? NO_VALUE : String(stat.value),
+      })),
+      trend: row.trend || null,
+      advice: row.advice || null,
+      spark: Array.isArray(row.spark) ? row.spark.filter(finite).map(Number) : null,
+    })),
+  };
+}
+
+/**
+ * The advertisement itself, as it will appear on each screen.
+ *
+ * This block is a rendering instruction, not a measurement, so it carries no
+ * provenance chip -- there is nothing to be right or wrong about in a piece
+ * of artwork. The numbers that justify running it live in the blocks around
+ * it.
+ *
+ * @param {{title?: string, cards: object[], note?: string|null}} props
+ * @returns {object}
+ */
+export function creative({ title = 'Creative', cards, note: footnote = null }) {
+  return {
+    type: 'creative',
+    title,
+    note: footnote,
+    cards: (cards || []).map((card) => ({
+      surfaceId: String(card.surfaceId || ''),
+      surfaceLabel: String(card.surfaceLabel || ''),
+      where: card.where || null,
+      aspect: Array.isArray(card.aspect) && card.aspect.length === 2
+        ? [Number(card.aspect[0]) || 1, Number(card.aspect[1]) || 1]
+        : [16, 9],
+      motif: card.motif || 'points',
+      palette: card.palette || { accent: '#62E0A8', ink: '#06080A', paper: '#E4EAEE' },
+      brand: card.brand || null,
+      storeNumber: card.storeNumber || null,
+      value: card.value || null,
+      kicker: card.kicker || null,
+      headline: String(card.headline || ''),
+      sub: card.sub || null,
+      cta: card.cta || null,
+      terms: card.terms || null,
+      status: card.status || 'staged',
+    })),
+  };
+}
+
+/**
+ * Where an offer is going, or has gone. Distribution state per screen,
+ * including which pushes cannot be recalled -- an operator approving a
+ * deployment is entitled to know which part of it is permanent.
+ *
+ * @param {{title?: string, rows: object[], note?: string|null}} props
+ * @returns {object}
+ */
+export function surfaces({ title = 'Distribution', rows, note: footnote = null }) {
+  return {
+    type: 'surfaces',
+    title,
+    note: footnote,
+    rows: (rows || []).map((row) => ({
+      id: String(row.id || ''),
+      label: String(row.label || ''),
+      where: row.where || null,
+      status: String(row.status || 'staged'),
+      statusLabel: String(row.statusLabel || row.status || 'Staged'),
+      tone: row.tone || 'ghost',
+      impressions: row.impressions === null || row.impressions === undefined ? NO_VALUE : String(row.impressions),
+      addressable: row.addressable === null || row.addressable === undefined ? NO_VALUE : String(row.addressable),
+      timing: row.timing || null,
+      irreversible: Boolean(row.irreversible),
+      note: row.note || null,
+    })),
+  };
+}
+
+/* -- Airspace blocks -------------------------------------------------------
+ * Time is the subject here, so these carry raw epoch-ms instants and raw
+ * numbers for geometry, alongside display strings for anything printed as-is.
+ * A lane whose feed could not answer says so in `status` and has no points —
+ * it is never drawn as a flat zero line.
+ */
+
+const LANE_STATUSES = new Set(['ready', 'stale', 'partial', 'computing', 'unavailable']);
+
+/**
+ * A scrubbable timeline: stacked lanes over one time domain, shaded bands for
+ * periods (a ground stop), lettered markers for reported moments, and the
+ * program state recorded at each sample.
+ *
+ * @param {{
+ *   key?: string, title?: string, domain: {from: number, to: number},
+ *   lanes: Array<{id: string, label: string, sub?: string|null, kind?: string, status?: string, reason?: string|null,
+ *     stepMs?: number|null, current?: string|null, points: Array<{t: number, value: number|null, compare?: number|null}>}>,
+ *   bands?: Array<{from: number, to: number, label: string, tone?: string}>,
+ *   markers?: Array<{key: string, t: number, label: string, detail?: string|null, sources?: Array<{outlet: string, url?: string|null}>}>,
+ *   programs?: Array<{t: number, groundStops: number, groundDelays: number, delays: number, airports?: string[]}>,
+ *   live?: {updatedAt: number|null, everyMs?: number|null},
+ *   note?: string|null,
+ * }} props
+ * @returns {object}
+ */
+export function timeline({ key = 'timeline', title = 'Over time', domain, lanes, bands = [], markers = [], programs = [], live = null, note: footnote = null }) {
+  const from = finite(domain?.from) ? Number(domain.from) : null;
+  const to = finite(domain?.to) ? Number(domain.to) : null;
+  return {
+    type: 'timeline',
+    key: String(key),
+    title,
+    domain: from !== null && to !== null && to > from ? { from, to } : null,
+    note: footnote,
+    lanes: (lanes || []).map((lane) => ({
+      id: String(lane.id || ''),
+      label: String(lane.label || ''),
+      sub: lane.sub || null,
+      kind: provenance(lane.kind || 'measured').key,
+      status: LANE_STATUSES.has(lane.status) ? lane.status : 'unavailable',
+      reason: lane.reason || null,
+      stepMs: finite(lane.stepMs) ? Number(lane.stepMs) : null,
+      current: lane.current === undefined || lane.current === null ? NO_VALUE : String(lane.current),
+      points: (lane.points || [])
+        .filter((point) => finite(point.t))
+        .map((point) => ({
+          t: Number(point.t),
+          value: finite(point.value) ? Number(point.value) : null,
+          compare: finite(point.compare) ? Number(point.compare) : null,
+        }))
+        .sort((a, b) => a.t - b.t),
+    })),
+    bands: (bands || [])
+      .filter((item) => finite(item.from) && finite(item.to))
+      .map((item) => ({ from: Number(item.from), to: Number(item.to), label: String(item.label || ''), tone: item.tone || 'alert' })),
+    markers: (markers || [])
+      .filter((item) => finite(item.t))
+      .map((item) => ({
+        key: String(item.key || ''),
+        t: Number(item.t),
+        label: String(item.label || ''),
+        detail: item.detail || null,
+        sources: (item.sources || []).map((src) => ({ outlet: String(src.outlet || ''), url: safeLink(src.url) })),
+      }))
+      .sort((a, b) => a.t - b.t),
+    programs: (programs || [])
+      .filter((item) => finite(item.t))
+      .map((item) => ({
+        t: Number(item.t),
+        groundStops: finite(item.groundStops) ? Number(item.groundStops) : null,
+        groundDelays: finite(item.groundDelays) ? Number(item.groundDelays) : null,
+        delays: finite(item.delays) ? Number(item.delays) : null,
+        airports: Array.isArray(item.airports) ? item.airports.map(String).slice(0, 12) : [],
+      }))
+      .sort((a, b) => a.t - b.t),
+    live: live ? { updatedAt: finite(live.updatedAt) ? Number(live.updatedAt) : null, everyMs: finite(live.everyMs) ? Number(live.everyMs) : null } : null,
+  };
+}
+
+/**
+ * Linked headlines from a news index. Titles and outlets are the publisher's;
+ * the board adds nothing but the time it was seen.
+ * @param {{title?: string, status?: string, source?: string|null, fetchedAt?: string|null, items: Array<{title: string, url: string, outlet?: string|null, publishedAt?: string|null}>, note?: string|null}} props
+ * @returns {object}
+ */
+export function headlines({ title = 'Latest coverage', status = 'ready', source = null, fetchedAt = null, items, note: footnote = null }) {
+  return {
+    type: 'headlines',
+    title,
+    status: LANE_STATUSES.has(status) || status === 'empty' ? status : 'unavailable',
+    source,
+    fetchedAt,
+    note: footnote,
+    items: (items || [])
+      .map((item) => ({
+        title: String(item.title || '').slice(0, 200),
+        url: safeLink(item.url),
+        outlet: item.outlet || null,
+        publishedAt: item.publishedAt || null,
+      }))
+      .filter((item) => item.title && item.url),
+  };
+}
+
+/**
+ * A curated event record: labelled facts, each with the outlets that reported
+ * it and any disagreement between them.
+ * @param {{title: string, sub?: string|null, asOf?: string|null, items: Array<{label: string, text: string, note?: string|null, sources?: Array<{outlet: string, url?: string|null}>}>}} props
+ * @returns {object}
+ */
+export function dossier({ title, sub = null, asOf = null, items }) {
+  return {
+    type: 'dossier',
+    title: String(title || ''),
+    sub,
+    asOf,
+    items: (items || []).map((item) => ({
+      label: String(item.label || ''),
+      text: String(item.text || ''),
+      note: item.note || null,
+      sources: (item.sources || []).map((src) => ({ outlet: String(src.outlet || ''), url: safeLink(src.url) })),
+    })),
+  };
+}
+
 /**
  * Assign stable ids to a composed block list. Ids are deterministic —
  * `type:index` — so a later patch can address a block without the composer
@@ -482,6 +818,10 @@ export function validateBlock(block) {
     problems.push('evidence row without a source');
   }
   if (block.type === 'gap' && !block.reason) problems.push('gap block has no reason');
+  if (block.type === 'dossier' && (block.items || []).some((item) => !(item.sources || []).length)) {
+    problems.push('dossier fact without a source');
+  }
+  if (block.type === 'timeline' && !block.domain) problems.push('timeline block has no time domain');
   return problems;
 }
 

@@ -89,7 +89,9 @@ export function environmentalLabel(choice = ENVIRONMENTAL_LABEL_CHOICE) {
 export const FIRST_RUN_MISSIONS = Object.freeze({
   'activate-network': Object.freeze({
     kind: 'sites-activate',
-    brand: "Casey's",
+    // No default brand: this mission asks the operator to name THEIR OWN
+    // business rather than silently activating a specific competitor's
+    // network on every fresh session (it used to hard-code "Casey's").
     busyText: 'Activating retail & fuel network…',
   }),
   'gap-discovery': Object.freeze({
@@ -274,12 +276,17 @@ export async function runFirstRunChoice(choice, { setContextMode, setLayerEnable
   if (!mission) return { ok: false, choice };
   if (mission.kind === 'none') return { ok: true, choice };
   if (mission.kind === 'sites-activate') {
+    if (!mission.brand) {
+      // No brand to activate and none invented in its place: ask the
+      // operator to name their own business instead.
+      return { ok: false, choice, needsInput: true };
+    }
     if (typeof activateNetwork === 'function') {
-      await activateNetwork(mission.brand || "Casey's");
+      await activateNetwork(mission.brand);
     } else {
       try {
         const { activateNetwork: runActivate } = await import('./portfolio/sitesPanel.js');
-        await runActivate(mission.brand || "Casey's");
+        await runActivate(mission.brand);
       } catch (err) {
         console.warn('Network activation failed:', err);
       }
@@ -511,6 +518,17 @@ export function initFirstRunExperience({
       dismiss();
       return;
     }
+    if (outcome?.needsInput) {
+      // This mission has no brand of its own to activate — hand the
+      // keyboard to the search box above instead of reporting a failure.
+      if (status) {
+        status.dataset.sticky = 'true';
+        status.textContent = 'Say or type your business name above, then press Search.';
+      }
+      setBusy(false);
+      intentInput?.focus({ preventScroll: true });
+      return;
+    }
     const failed = outcome?.failedLayerIds?.length
       ? outcome.failedLayerIds
       : outcome?.result?.failedLayerIds;
@@ -560,6 +578,23 @@ export function initFirstRunExperience({
   };
 
   if (intentForm && intentInput) {
+    // Attached before the form's own submit listener (registered right
+    // below) so a selected suggestion's Enter keydown — which calls
+    // stopImmediatePropagation — runs first and a chosen suggestion never
+    // ALSO re-submits the form with the raw, pre-selection text.
+    import('./portfolio/searchSuggestions.js').then(({ attachSearchSuggestions }) => {
+      attachSearchSuggestions(intentInput, {
+        getBias: () => {
+          const cartographic = styleManager?.viewer?.camera?.positionCartographic;
+          if (!cartographic) return {};
+          return {
+            biasLat: (cartographic.latitude * 180) / Math.PI,
+            biasLon: (cartographic.longitude * 180) / Math.PI,
+          };
+        },
+        onSelect: (result) => { void executeIntent(result.name); },
+      });
+    });
     intentForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       await executeIntent(intentInput.value.trim());

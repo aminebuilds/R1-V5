@@ -21,6 +21,10 @@ import { SceneDirector } from './scenes/director.js';
 import { initR1VoiceCommands } from './voice/r1Realtime.js';
 import { ensureActionRunner } from './voice/r1Actions.js';
 import { initExplainBoard } from './explain/board.js';
+import { initAirspaceBrief } from './airspace/airspaceLive.js';
+import sitesLayer from './data/sitesLayer.js';
+import { initSitesPanel } from './portfolio/sitesPanel.js';
+import { initChatPanel } from './chat/chatPanel.js';
 import { MapStackController } from './mapStackController.js';
 import { initAnnotations } from './annotations/index.js';
 import { initLogoGaze } from './logoGaze.js';
@@ -32,8 +36,8 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
-import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
+import { initTimeStrip } from './timeline/timeStrip.js';
 
 initLogoGaze();
 
@@ -238,6 +242,7 @@ async function init() {
     dataManager.register(militaryInstallationsLayer);
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
+    dataManager.register(sitesLayer);
     for (const layer of localDataLayers) {
       dataManager.register(layer);
     }
@@ -256,6 +261,13 @@ async function init() {
     dataManager.buildTogglePanel(document.getElementById('data-toggles'));
     styleManager.attachDataManager(dataManager);
 
+    // Wires the SITES panel's own search box/button, heatmap toggle, CSV
+    // import, and click-to-brief on a site pin (r1:entity-selected). Without
+    // this call none of it is interactive — activateNetwork/searchAndAddBusiness
+    // still work when reached through voice or the first-run launcher (which
+    // call them directly), but the persistent panel's own controls were dead.
+    initSitesPanel({ viewer, styleManager, dataManager });
+
     // Initialize deterministic scene playback for social clip capture
     const sceneDirector = new SceneDirector(viewer, styleManager, dataManager);
 
@@ -272,7 +284,7 @@ async function init() {
         const vertical = getVerticalById(val);
         if (vertical) {
           if (mastheadSubtitle) {
-            mastheadSubtitle.textContent = `REAL-TIME COMMERCIAL INTELLIGENCE · ${vertical.name.toUpperCase()}`;
+            mastheadSubtitle.textContent = `PAR INTELLIGENCE R1 · ${vertical.name.toUpperCase()}`;
           }
           if (Array.isArray(vertical.recommendedLayers)) {
             for (const layerId of vertical.recommendedLayers) {
@@ -282,7 +294,7 @@ async function init() {
             }
           }
         } else if (mastheadSubtitle) {
-          mastheadSubtitle.textContent = 'REAL-TIME COMMERCIAL INTELLIGENCE · ALL INDUSTRIES';
+          mastheadSubtitle.textContent = 'PAR INTELLIGENCE R1 · ALL INDUSTRIES';
         }
       });
     }
@@ -315,10 +327,8 @@ async function init() {
     // its chance to register pre-install holds. (perf wave 2)
     installRenderGovernor(viewer);
 
-    // The explicit scope mask replaces the emergent six-pass artifact —
-    // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
-    // toggle finds it live.
-    installScopeMask(viewer);
+    // Scope mask (src/scopeMask.js) is no longer installed — the circular
+    // viewport vignette was removed from the HUD on 2026-11-13 (owner: distracting).
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)
@@ -370,6 +380,26 @@ async function init() {
     // spoken one execute exactly the same function — the mic is a second front
     // door, never the only one.
     window.__r1.explain = initExplainBoard({
+      viewer,
+      runAction: ensureActionRunner({ viewer, styleManager, dataManager, sceneDirector, annotations }),
+    });
+
+    // US airspace brief: the board's "US airspace" button and `?airspace`
+    // open it; it then refreshes in place each minute while it stays open.
+    window.__r1.airspace = initAirspaceBrief();
+
+    // Time slider: the clock button, `?time` or `?at=-36h` open it. Layers
+    // with a measured past (fires, earthquakes) re-draw for the cursor; every
+    // other layer stays live and the strip names them.
+    window.__r1.time = initTimeStrip({
+      viewer,
+      dataManager,
+      toggleButton: document.getElementById('time-slider-toggle'),
+    });
+
+    // Typed chat: a keyboard front door with the same tool access as voice,
+    // via the identical shared runner — never its own action logic.
+    window.__r1.chat = initChatPanel({
       viewer,
       runAction: ensureActionRunner({ viewer, styleManager, dataManager, sceneDirector, annotations }),
     });
