@@ -38,6 +38,7 @@ import {
 } from './renderGovernor.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initTimeStrip } from './timeline/timeStrip.js';
+import { initJarvisGlobe } from './jarvis/globeMode.js';
 
 initLogoGaze();
 
@@ -395,6 +396,17 @@ async function init() {
       viewer,
       dataManager,
       toggleButton: document.getElementById('time-slider-toggle'),
+    });
+
+    // Jarvis: the operator's home on the map — radar, alert areas, incidents,
+    // airports — from /api/jarvis/snapshot. The top-bar button or `?jarvis`.
+    window.__r1.jarvis = initJarvisGlobe({
+      viewer,
+      dataManager,
+      requestRender: governorRequestRender,
+      ready: styleManager.initialRestorePromise,
+      // Protection mode speaks new act-level alerts when a voice session is live.
+      getVoice: () => window.__r1?.voiceCommands || null,
     });
 
     // Typed chat: a keyboard front door with the same tool access as voice,

@@ -232,10 +232,41 @@ export function parseNwsAlerts(payload) {
       sender: p.senderName || null,
       area: p.areaDesc || null,
       url: safeUrl(p['@id'] || feature.id),
+      // Drawn on the map: the alert's own polygon when NWS sends one,
+      // otherwise the service resolves these zone URLs to their outlines.
+      areas: geometryRings(feature.geometry),
+      zones: (Array.isArray(p.affectedZones) ? p.affectedZones : []).filter((z) => /^https:\/\/api\.weather\.gov\/zones\//.test(z)).slice(0, 4),
     });
   }
   return out.sort((a, b) => (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0)
     || String(a.onset).localeCompare(String(b.onset)));
+}
+
+/**
+ * GeoJSON Polygon / MultiPolygon → outer rings as `[[lon, lat], …]`, each
+ * thinned to at most `maxPoints` vertices (drawing, not measurement).
+ * @returns {Array<Array<[number, number]>>}
+ */
+export function geometryRings(geometry, maxPoints = 240) {
+  if (!geometry || typeof geometry !== 'object') return [];
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
+    : geometry.type === 'MultiPolygon' ? geometry.coordinates
+      : geometry.type === 'GeometryCollection' ? (geometry.geometries || []).flatMap((g) => geometryRings(g, maxPoints).map((r) => [r]))
+        : [];
+  return polygons
+    .map((poly) => (Array.isArray(poly) ? poly[0] : null))
+    .filter((ring) => Array.isArray(ring) && ring.length >= 4)
+    .map((ring) => thin(ring.filter((c) => num(c?.[0]) !== null && num(c?.[1]) !== null), maxPoints)
+      .map((c) => [round(c[0], 5), round(c[1], 5)]));
+}
+
+/** NOAA radar ImageServer metadata → the newest mosaic time. */
+export function parseRadarMeta(payload) {
+  const extent = payload?.timeInfo?.timeExtent;
+  requireShape(Array.isArray(extent) && extent.length === 2, 'NOAA radar metadata');
+  const end = num(extent[1]);
+  requireShape(end !== null, 'NOAA radar time');
+  return { latestMs: end, earliestMs: num(extent[0]) };
 }
 
 /** "10 to 15 mph" → 15; "25 mph" → 25. */
@@ -479,10 +510,11 @@ export function parseTomTomIncidents(payload, home, { maxKm = 8 } = {}) {
     const p = inc.properties || {};
     const coords = inc.geometry?.type === 'Point' ? [inc.geometry.coordinates] : (inc.geometry?.coordinates || []);
     let best = null;
+    let nearest = null;
     for (const c of coords) {
       if (!Array.isArray(c)) continue;
       const d = haversineKm(home.lat, home.lon, c[1], c[0]);
-      if (best === null || d < best) best = d;
+      if (best === null || d < best) { best = d; nearest = c; }
     }
     if (best === null || best > maxKm) continue;
     const category = TOMTOM_CATEGORY[p.iconCategory] || 'Incident';
@@ -501,6 +533,10 @@ export function parseTomTomIncidents(payload, home, { maxKm = 8 } = {}) {
       start: iso(p.startTime),
       end: iso(p.endTime),
       distanceKm: round(best, 1),
+      // Where to draw it: the point nearest home and the published geometry, thinned.
+      lat: round(nearest[1], 5),
+      lon: round(nearest[0], 5),
+      path: thin(coords.filter((c) => Array.isArray(c) && num(c[0]) !== null), 40).map((c) => [round(c[0], 5), round(c[1], 5)]),
     });
   }
   const severity = (i) => (i.category === 'Road closed' ? 5 : i.magnitude);
@@ -522,6 +558,8 @@ export function parseTicketmaster(payload) {
       city: venue.city?.name || null,
       segment: e.classifications?.[0]?.segment?.name || null,
       distanceMi: round(e.distance, 1),
+      lat: num(venue.location?.latitude),
+      lon: num(venue.location?.longitude),
       url: safeUrl(e.url),
     };
   });
@@ -1024,4 +1062,199 @@ export function parseBlueskySearch(payload, query) {
       url: handle && rkey ? `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(rkey)}` : null,
     };
   });
+}
+
+// ── water, safety, airspace (protection layers) ────────────────────────────
+
+/** NWPS flood categories, worst last. Anything else is "not ranked". */
+export const FLOOD_RANK = Object.freeze({ no_flooding: 0, action: 1, minor: 2, moderate: 3, major: 4 });
+
+const stage = (v) => (num(v) !== null && v > -900 ? num(v) : null);
+
+/** NOAA NWPS gauges (rivers and tidal stations) with observed and forecast flood category. */
+export function parseNwpsGauges(payload, home) {
+  requireShape(Array.isArray(payload?.gauges), 'NWPS gauges');
+  return payload.gauges
+    .map((g) => {
+      const obs = g.status?.observed || {};
+      const fc = g.status?.forecast || {};
+      const lat = num(g.latitude);
+      const lon = num(g.longitude);
+      return {
+        id: g.lid,
+        name: String(g.name || g.lid).replace(/\s*\((?:IN )?MLLW\)\s*/i, '').trim(),
+        tidal: /MLLW/i.test(g.name || ''),
+        lat,
+        lon,
+        distanceKm: home && lat !== null && lon !== null ? round(haversineKm(home.lat, home.lon, lat, lon), 1) : null,
+        observed: { stage: stage(obs.primary), unit: obs.primaryUnit || 'ft', category: obs.floodCategory || null, at: iso(obs.validTime) },
+        forecast: { stage: stage(fc.primary), unit: fc.primaryUnit || 'ft', category: fc.floodCategory || null, at: iso(fc.validTime) },
+        url: g.lid ? `https://water.noaa.gov/gauges/${encodeURIComponent(String(g.lid).toLowerCase())}` : null,
+      };
+    })
+    .filter((g) => g.lat !== null && g.observed.category !== 'out_of_service')
+    .sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
+}
+
+/** Worst observed-or-forecast flood rank for a gauge (0 when none). */
+export function gaugeRank(g) {
+  return Math.max(FLOOD_RANK[g?.observed?.category] ?? 0, FLOOD_RANK[g?.forecast?.category] ?? 0);
+}
+
+/** NDBC realtime2 standard met file → newest wind/pressure and newest wave reading. */
+export function parseNdbc(text, { now = Date.now(), maxAgeH = 6 } = {}) {
+  const lines = String(text || '').split(/\r?\n/).filter(Boolean);
+  requireShape(/^#YY/.test(lines[0] || ''), 'NDBC buoy');
+  const cols = lines[0].replace(/^#/, '').trim().split(/\s+/);
+  const rows = lines.slice(2).map((l) => {
+    const v = l.trim().split(/\s+/);
+    const r = Object.fromEntries(cols.map((c, i) => [c, v[i] === 'MM' ? null : v[i]]));
+    r.at = Date.UTC(+r.YY, +r.MM - 1, +r.DD, +r.hh, +r.mm);
+    return r;
+  }).filter((r) => Number.isFinite(r.at) && now - r.at <= maxAgeH * 3600_000);
+  const latest = rows[0] || null;
+  const wave = rows.find((r) => num(r.WVHT) !== null) || null;
+  if (!latest) return null;
+  const kt = (v) => (num(v) !== null ? round(v * 1.943844, 0) : null);
+  return {
+    at: iso(latest.at),
+    windKt: kt(latest.WSPD),
+    gustKt: kt(latest.GST),
+    windFrom: compass(latest.WDIR),
+    pressureHpa: round(latest.PRES, 1),
+    waterTempF: num(latest.WTMP) !== null ? round(latest.WTMP * 9 / 5 + 32, 0) : null,
+    waveAt: wave ? iso(wave.at) : null,
+    waveHeightFt: wave ? round(wave.WVHT * 3.28084, 1) : null,
+    dominantPeriodS: wave ? round(wave.DPD, 0) : null,
+    waveFrom: wave ? compass(wave.MWD) : null,
+  };
+}
+
+/** FEMA National Shelter System — shelters currently OPEN in the region. */
+export function parseFemaShelters(payload, home) {
+  requireShape(Array.isArray(payload?.features), 'FEMA open shelters');
+  return payload.features.map((f) => f.attributes || {}).map((a) => ({
+    kind: 'open-shelter',
+    name: a.shelter_name || 'Shelter',
+    address: [a.address, a.city, a.state].filter(Boolean).join(', '),
+    capacity: num(a.evacuation_capacity),
+    population: num(a.total_population),
+    org: a.org_name || null,
+    pets: a.pet_accommodations_code || null,
+    wheelchair: a.wheelchair_accessible || null,
+    lat: num(a.latitude),
+    lon: num(a.longitude),
+  })).filter((s) => s.lat !== null && s.lon !== null).map((s) => ({
+    ...s, distanceKm: home ? round(haversineKm(home.lat, home.lon, s.lat, s.lon), 1) : null,
+  })).sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
+/** FAA TFR list → restrictions in the given states. */
+export function parseTfrList(payload, states) {
+  requireShape(Array.isArray(payload), 'FAA TFR list');
+  const wanted = new Set(states);
+  return payload.filter((t) => wanted.has(t.state)).map((t) => ({
+    id: t.notam_id,
+    type: t.type || null,
+    state: t.state,
+    facility: t.facility || null,
+    description: String(t.description || '').slice(0, 200),
+    created: t.creation_date || null,
+    url: 'https://tfr.faa.gov/tfr3/',
+  }));
+}
+
+function safeKind(tags) {
+  if (tags.amenity === 'hospital') return 'hospital';
+  if (tags.amenity === 'police') return 'police';
+  if (tags.amenity === 'fire_station') return 'fire';
+  if (tags.emergency === 'assembly_point') return 'assembly';
+  return 'shelter';
+}
+
+/** Overpass → public safe places (hospitals, police, fire stations, mapped shelters). */
+export function parseSafePlaces(payload, home) {
+  requireShape(Array.isArray(payload?.elements), 'Overpass safe places');
+  const seen = new Set();
+  const out = [];
+  for (const e of payload.elements) {
+    const lat = num(e.lat ?? e.center?.lat);
+    const lon = num(e.lon ?? e.center?.lon);
+    if (lat === null || lon === null) continue;
+    const tags = e.tags || {};
+    const kind = safeKind(tags);
+    const name = tags.name || tags.operator || null;
+    if (!name && kind !== 'assembly') continue;
+    const key = `${kind}|${String(name).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      kind,
+      name: name || 'Assembly point',
+      emergency: tags.emergency || null,
+      lat,
+      lon,
+      distanceKm: home ? round(haversineKm(home.lat, home.lon, lat, lon), 1) : null,
+      osm: `https://www.openstreetmap.org/${e.type}/${e.id}`,
+    });
+  }
+  return out.sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
+/** Nominatim search results of one kind → safe-place items. */
+export function parseNominatimPlaces(list, kind, home) {
+  requireShape(Array.isArray(list), 'Nominatim search');
+  const type = { hospital: 'hospital', police: 'police', fire: 'fire_station' }[kind];
+  return list
+    .filter((r) => r.category === 'amenity' && (!type || r.type === type))
+    .map((r) => {
+      const lat = num(r.lat);
+      const lon = num(r.lon);
+      return {
+        kind,
+        name: r.name || String(r.display_name || '').split(',')[0],
+        emergency: r.extratags?.emergency || null,
+        lat,
+        lon,
+        distanceKm: home && lat !== null ? round(haversineKm(home.lat, home.lon, lat, lon), 1) : null,
+        osm: r.osm_type && r.osm_id ? `https://www.openstreetmap.org/${r.osm_type}/${r.osm_id}` : null,
+      };
+    })
+    .filter((p) => p.lat !== null && p.name);
+}
+
+const NOT_AN_ER_RE = /\b(rehab\w*|psychiatric|behavioral|nursing|hospice|veterans|VA|children's specialized)\b/i;
+
+/**
+ * Escape-route destinations: hospitals with a mapped emergency department
+ * first, then general hospitals (rehab, psychiatric, veterans-only sites
+ * excluded), nearest first.
+ */
+export function pickRouteHospitals(places, count = 2) {
+  const hospitals = (places || []).filter((p) => p.kind === 'hospital' && p.emergency !== 'no' && !NOT_AN_ER_RE.test(p.name));
+  const withEr = hospitals.filter((p) => p.emergency === 'yes');
+  const rest = hospitals.filter((p) => p.emergency !== 'yes');
+  return [...withEr, ...rest].slice(0, count);
+}
+
+/** Keep headlines whose own title matches every pattern. */
+export function filterTitles(items, patterns) {
+  return (items || []).filter((n) => patterns.every((re) => re.test(n.title || '')));
+}
+
+/** OSRM route → duration, distance, and the road geometry (thinned). */
+export function parseOsrmRoute(payload) {
+  const r = payload?.routes?.[0];
+  requireShape(payload?.code === 'Ok' && r, 'OSRM route');
+  return {
+    durationMin: Math.round(num(r.duration) / 60),
+    distanceKm: round(num(r.distance) / 1000, 1),
+    path: thin(r.geometry?.coordinates || [], 160).map((c) => [round(c[0], 5), round(c[1], 5)]),
+  };
+}
+
+/** Open-Meteo elevation (Copernicus 90 m DEM) → metres per input point. */
+export function parseElevations(payload, count) {
+  requireShape(Array.isArray(payload?.elevation) && payload.elevation.length === count, 'Open-Meteo elevation');
+  return payload.elevation.map((v) => round(v, 0));
 }

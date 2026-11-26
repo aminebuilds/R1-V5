@@ -659,16 +659,18 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   // which retired the remote par_intelligence MCP tool and added seven
   // function tools in its place — get_store_performance, get_store_pulse,
   // get_member_intelligence, get_campaign_performance, recommend_offer,
-  // create_offer and deploy_offer (46 tools -> 53). No existing tool was
+  // create_offer and deploy_offer (46 tools -> 53); and now for Jarvis
+  // protection mode, which appended set_protection_mode (53 tools -> 54) at the
+  // end of the array. No existing tool was
   // touched, which the companion digest in src/radioMarkup.test.mjs proves
   // independently: its 21-tool `unchanged` set still hashes to the same value.
   // Every one was a separate, deliberate change, NOT the mission mapping — the
   // rule this test protects (missions ride existing tools and never touch the
   // schema) is unchanged, and this pin is what still enforces it.
-  assert.equal(block.length, 59666, 'tool schema byte length drifted from the baseline');
+  assert.equal(block.length, 61013, 'tool schema byte length drifted from the baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'c325a6c87df6589f3533baf29e48b4ae1f5574732e88850ed45599c3a2224565',
+    'aa0c41e35eb373d4274acb0f439b8860e7aede1f869924e291ac718d5a963bb8',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

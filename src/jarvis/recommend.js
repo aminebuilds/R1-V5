@@ -631,6 +631,192 @@ function setup(feeds, out) {
   });
 }
 
+
+// ── protection layers: water, airspace, reports, playbooks ──────────────────
+
+/**
+ * Survival playbooks — fixed procedures (Ready.gov / FEMA / NWS guidance),
+ * attached to an item only when a LIVE trigger fires. They are guidance, not
+ * data, and are labelled that way in the UI.
+ */
+export const PLAYBOOKS = Object.freeze({
+  flood: [
+    'Never walk or drive through moving water: 6 in can knock you down, 12 in can float a car.',
+    'If water threatens the building: move people, pets and documents above the ground floor.',
+    'Switch off power at the breaker only if you can reach it standing on dry ground.',
+    'If told to leave, take the pre-planned route on the map and turn back at any flooded road.',
+  ],
+  wind: [
+    'Bring in or tie down outdoor furniture, bins and decorations.',
+    'Stay clear of trees and downed lines — treat every wire as live and call it in.',
+    'Charge phones and a battery pack now in case the power goes.',
+    'Driving: both hands on the wheel; high-profile vehicles avoid exposed bridges.',
+  ],
+  power: [
+    'Unplug sensitive electronics; leave one lamp on to know when power returns.',
+    'Keep the fridge closed: food stays safe ~4 h (fridge), ~48 h (full freezer).',
+    'Generators and grills outdoors only, 20 ft from windows — carbon monoxide kills indoors.',
+    'Charge phones and a battery pack now; check on neighbours who rely on medical devices.',
+  ],
+  finsec: [
+    'Do not act on calls, texts or emails "from your bank" — call the number on the back of your card.',
+    'Turn on transaction alerts and check recent activity in each account.',
+    'Keep some cash and a second payment method that runs on a different network.',
+    'Do not move money or sell in a hurry because of the headline; verify with the institution first.',
+  ],
+  cyber: [
+    'Update the affected device or app today (Settings → Software Update).',
+    'Change the password for any service named in the advisory; turn on 2-step verification.',
+    'Watch for phishing that references the incident — it always follows.',
+  ],
+  quake: [
+    'Drop, cover, hold on during shaking; expect aftershocks.',
+    'Smell gas? Leave, then call the utility from outside. Do not use switches.',
+    'Check walls, chimney and foundation before going back in.',
+  ],
+  cold: [
+    'Limit time outside; cover skin — frostbite starts on fingers, ears and nose.',
+    'Let faucets drip and open sink cabinets to keep pipes from freezing.',
+    'Never heat the home with an oven or grill.',
+  ],
+  heat: [
+    'Drink water before you are thirsty; avoid alcohol and heavy meals.',
+    'Stay in air-conditioning in the hottest hours; check on older neighbours.',
+  ],
+  air: [
+    'Keep windows closed; run any air purifier on high.',
+    'Move exercise indoors; an N95 helps if you must be outside.',
+  ],
+});
+
+const FLOOD_LABEL = { action: 'action stage', minor: 'minor flood', moderate: 'moderate flood', major: 'major flood' };
+const FLOOD_RANK_LOCAL = { no_flooding: 0, action: 1, minor: 2, moderate: 3, major: 4 };
+const rankOf = (cat) => FLOOD_RANK_LOCAL[cat] ?? 0;
+
+/** The pre-planned escape route text, from the safety feed. */
+function routeLine(feeds) {
+  const s = dataOf(feeds, 'safety.places');
+  const r = s?.routes?.[0];
+  if (!r) return null;
+  const higher = s.homeElevationM !== null && r.to.elevationM !== null ? ` (${r.to.elevationM} m elevation vs home ${s.homeElevationM} m)` : '';
+  return `Pre-planned route: ${r.to.name}, ${r.durationMin} min / ${r.distanceKm} km by car${higher}. The route does not know which roads are flooded.`;
+}
+
+function water(feeds, out) {
+  const gauges = dataOf(feeds, 'water.gauges');
+  if (gauges?.length) {
+    const flooding = gauges
+      .filter((g) => (g.distanceKm ?? 99) <= 30 && Math.max(rankOf(g.observed.category), rankOf(g.forecast.category)) >= 2)
+      .sort((a, b) => Math.max(rankOf(b.observed.category), rankOf(b.forecast.category)) - Math.max(rankOf(a.observed.category), rankOf(a.forecast.category)) || a.distanceKm - b.distanceKm);
+    if (flooding.length) {
+      const worst = flooding[0];
+      const worstRank = Math.max(rankOf(worst.observed.category), rankOf(worst.forecast.category));
+      const nearRiver = flooding.some((g) => !g.tidal && g.distanceKm <= 8 && Math.max(rankOf(g.observed.category), rankOf(g.forecast.category)) >= 3);
+      const describe = (g) => {
+        const now = g.observed.stage !== null ? `${FLOOD_LABEL[g.observed.category] || g.observed.category} at ${g.observed.stage} ${g.observed.unit}` : null;
+        const later = rankOf(g.forecast.category) >= 2 && g.forecast.stage !== null ? `forecast ${FLOOD_LABEL[g.forecast.category]} ${g.forecast.stage} ${g.forecast.unit} by ${fmtEt(g.forecast.at, { day: true })}` : null;
+        return `${g.name} (${g.distanceKm} km): ${[now, later].filter(Boolean).join(', ')}`;
+      };
+      const route = routeLine(feeds);
+      out.push({
+        id: `flood:${flooding.map((g) => `${g.id}-${g.observed.category}-${g.forecast.category}`).join(',')}`,
+        level: nearRiver || worstRank >= 4 ? 'act' : 'watch',
+        domain: 'safety',
+        title: `${worst.tidal ? 'Coastal flooding' : 'River flooding'}: ${worst.name} — ${FLOOD_LABEL[rankOf(worst.observed.category) >= rankOf(worst.forecast.category) ? worst.observed.category : worst.forecast.category]}`,
+        action: `Avoid low roads along the rivers and the bay; never drive into water.${route ? ` ${route}` : ''}`,
+        evidence: flooding.slice(0, 3).map((g) => ev(feeds, 'water.gauges', describe(g))),
+        playbook: PLAYBOOKS.flood,
+        url: worst.url,
+        geo: { lat: worst.lat, lon: worst.lon },
+      });
+    }
+  }
+  const b = dataOf(feeds, 'water.buoy');
+  if (b && ((b.waveHeightFt ?? 0) >= 8 || (b.gustKt ?? 0) >= 34)) {
+    out.push({
+      id: `buoy:${b.station}:${Math.round(b.waveHeightFt ?? 0)}:${b.gustKt ?? 0}`,
+      level: (b.waveHeightFt ?? 0) >= 15 || (b.gustKt ?? 0) >= 48 ? 'watch' : 'info',
+      domain: 'safety',
+      title: `Rough seas at the harbor entrance: ${b.waveHeightFt ?? '—'} ft waves, gusts ${b.gustKt ?? '—'} kt`,
+      action: 'Coastal storm conditions: expect higher tides and surge in the bays; stay off the water and the shore roads.',
+      evidence: [ev(feeds, 'water.buoy', `Buoy ${b.station}: ${b.dominantPeriodS ?? '—'} s period from ${b.waveFrom || '—'}, wind ${b.windFrom || ''} ${b.windKt ?? '—'} kt, water ${b.waterTempF ?? '—'}°F`)],
+      url: b.url,
+    });
+  }
+}
+
+function airspaceAndReports(feeds, out, now) {
+  for (const t of (dataOf(feeds, 'airspace.tfr') || []).slice(0, 3)) {
+    out.push({
+      id: `tfr:${t.id}`,
+      level: 'watch',
+      domain: 'travel',
+      title: `Flight restriction (${t.type || 'TFR'}): ${t.description}`,
+      action: 'Drones and private aircraft are restricted inside it — expect security activity in that area.',
+      evidence: [ev(feeds, 'airspace.tfr', `FAA NOTAM ${t.id} · ${t.state}`)],
+      url: t.url,
+    });
+  }
+  const recent = (id, hours) => (dataOf(feeds, id) || []).filter((n) => n.at && now - Date.parse(n.at) <= hours * 3600_000);
+  const uap = recent('news.uap', 48).slice(0, 2);
+  if (uap.length) {
+    out.push({
+      id: `uap:${uap[0].url}`,
+      level: 'info',
+      domain: 'narrative',
+      title: `Drone / UAP reports (unverified): ${uap[0].title}`,
+      action: 'Reports, not confirmed events. Flight restrictions above are the official signal.',
+      evidence: uap.map((n) => ev(feeds, 'news.uap', `${n.title} — ${n.source || 'news'}, ${agoH(n.at, now)}`)),
+      url: uap[0].url,
+    });
+  }
+  const fin = recent('news.finsec', 12).slice(0, 2);
+  if (fin.length) {
+    out.push({
+      id: `finsec:${fin[0].url}`,
+      level: 'watch',
+      domain: 'cyber',
+      title: `Payments / banking incident reported: ${fin[0].title}`,
+      action: 'Verify with your bank before acting on any message about it; watch your accounts.',
+      evidence: fin.map((n) => ev(feeds, 'news.finsec', `${n.title} — ${n.source || 'news'}, ${agoH(n.at, now)}`)),
+      playbook: PLAYBOOKS.finsec,
+      url: fin[0].url,
+    });
+  }
+  const power = recent('news.power', 24).slice(0, 2);
+  if (power.length) {
+    out.push({
+      id: `power:${power[0].url}`,
+      level: 'watch',
+      domain: 'safety',
+      title: `Power outage reports near you: ${power[0].title}`,
+      action: 'Get ready before it reaches you: charge devices now. (Utility outage maps have no public feed.)',
+      evidence: power.map((n) => ev(feeds, 'news.power', `${n.title} — ${n.source || 'news'}, ${agoH(n.at, now)}`)),
+      playbook: PLAYBOOKS.power,
+      url: power[0].url,
+    });
+  }
+}
+
+/** Attach playbooks to items whose live trigger maps to one. */
+function attachPlaybooks(items) {
+  for (const i of items) {
+    if (i.playbook) continue;
+    const t = `${i.id} ${i.title}`;
+    if (/^nws:/.test(i.id) && /flood|surge|coastal/i.test(i.title)) i.playbook = PLAYBOOKS.flood;
+    else if (/^nws:/.test(i.id) && /winter|ice|freez|cold|chill/i.test(i.title)) i.playbook = PLAYBOOKS.cold;
+    else if (/^nws:/.test(i.id) && /heat/i.test(i.title)) i.playbook = PLAYBOOKS.heat;
+    else if (/^nws:/.test(i.id) && /wind|storm|hurricane|tornado/i.test(i.title)) i.playbook = PLAYBOOKS.wind;
+    else if (/^wx:gust/.test(i.id)) i.playbook = PLAYBOOKS.wind;
+    else if (/^wx:windchill|^wx:hardfreeze/.test(i.id)) i.playbook = PLAYBOOKS.cold;
+    else if (/^wx:heat/.test(i.id)) i.playbook = PLAYBOOKS.heat;
+    else if (/^air:/.test(i.id)) i.playbook = PLAYBOOKS.air;
+    else if (/^quake:/.test(i.id)) i.playbook = PLAYBOOKS.quake;
+    else if (/^kev:|^hn-sec:/.test(t)) i.playbook = PLAYBOOKS.cyber;
+  }
+  return items;
+}
+
 /**
  * Build the ranked brief.
  * @param {Record<string, {kind: string, data: any, reason?: string}>} feeds
@@ -644,6 +830,8 @@ export function buildBrief(feeds, ctx = {}) {
     () => measuredConditions(feeds, out),
     () => forecast(feeds, out, now),
     () => air(feeds, out),
+    () => water(feeds, out),
+    () => airspaceAndReports(feeds, out, now),
     () => hazards(feeds, out, now),
     () => localReports(feeds, out, now),
     () => traffic(feeds, out, now),
@@ -666,7 +854,7 @@ export function buildBrief(feeds, ctx = {}) {
       if (ctx.log) ctx.log(`[jarvis] rule failed: ${error?.message || error}`);
     }
   }
-  return out
+  return attachPlaybooks(out)
     .map((item, index) => ({ ...item, index }))
     .sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || DOMAIN_RANK[a.domain] - DOMAIN_RANK[b.domain] || a.index - b.index)
     .map(({ index, ...item }) => item);

@@ -17,14 +17,27 @@
 import * as F from './feeds.js';
 import {
   BLS_SERIES, BLUESKY_QUERIES, DEFAULT_MARKET_BOARD, DEFAULT_NEWS_QUERIES, GDELT_THEMES,
-  HOME_AIRPORTS, JARVIS_USER_AGENT, REDDIT_SUBS, assertAllowedUrl, homePlaces, localNewsQueries,
-  parseWatchlist, urls,
+  AIRPORT_POINTS, DEFAULT_BUOY, HOME_AIRPORTS, JARVIS_USER_AGENT, REDDIT_SUBS, REPORT_QUERIES, REPORT_TITLE_FILTERS, TFR_STATES,
+  assertAllowedUrl, homePlaces, localNewsQueries, nearBbox, parseWatchlist, powerQuery, radarBbox, regionBbox,
+  safePlacesQuery, urls,
 } from './sources.js';
 import { parseNasStatusXml } from '../airspace/nasStatus.js';
 import { etParts, marketSession } from './marketCalendar.js';
 import { buildBrief, situationLine } from './recommend.js';
 
 const MIN = 60_000;
+
+/**
+ * Asked-for layers with no free, live, truthful source. Shown as unavailable
+ * with the reason — never approximated.
+ */
+export const KNOWN_GAPS = Object.freeze([
+  { label: 'Foot traffic', reason: 'No free live source: Placer.ai and similar are licensed, and Google does not expose live busyness through its API.' },
+  { label: 'Power outage map', reason: 'PSE&G and JCP&L publish outage maps but no public API; outage REPORTS from news are shown instead.' },
+  { label: 'UFO / UAP sightings', reason: 'NUFORC has no live API and its reports lag by weeks; drone/UAP news reports and FAA flight restrictions are shown instead.' },
+  { label: 'Crime', reason: 'No live incident feed exists for this area; local incident headlines are shown instead.' },
+  { label: 'Private bunkers / hidden sites', reason: 'Not public, not verifiable, and not safe to route to. Official shelters (FEMA, when opened), hospitals, police and fire stations are shown instead.' },
+]);
 const HOUR = 60 * MIN;
 
 /** HTTP failure carrying the upstream status. */
@@ -39,7 +52,12 @@ export class HttpError extends Error {
  * Default fetcher: allowlisted https hosts only, timeout, byte cap, and the
  * final (post-redirect) host re-checked against the allowlist.
  */
-export async function defaultFetchText(url, { method = 'GET', headers = {}, body, timeoutMs = 12_000, maxBytes = 8 * 1024 * 1024 } = {}) {
+export async function defaultFetchText(url, options = {}) {
+  return new TextDecoder('utf-8').decode(await defaultFetchBytes(url, options));
+}
+
+/** Same guarantees as `defaultFetchText`, returning the raw bytes (radar PNG). */
+export async function defaultFetchBytes(url, { method = 'GET', headers = {}, body, timeoutMs = 12_000, maxBytes = 8 * 1024 * 1024 } = {}) {
   assertAllowedUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -53,7 +71,7 @@ export async function defaultFetchText(url, { method = 'GET', headers = {}, body
     });
     if (res.url) assertAllowedUrl(res.url);
     if (!res.ok) throw new HttpError(res.status);
-    if (!res.body?.getReader) return await res.text();
+    if (!res.body?.getReader) return new Uint8Array(await res.arrayBuffer());
     const reader = res.body.getReader();
     const chunks = [];
     let total = 0;
@@ -70,7 +88,7 @@ export async function defaultFetchText(url, { method = 'GET', headers = {}, body
     const merged = new Uint8Array(total);
     let offset = 0;
     for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
-    return new TextDecoder('utf-8').decode(merged);
+    return merged;
   } finally {
     clearTimeout(timer);
   }
@@ -113,6 +131,7 @@ function titleCaseAddress(text) {
 export function createJarvisService({
   env = {},
   fetchText = defaultFetchText,
+  fetchBytes = defaultFetchBytes,
   store = null,
   now = () => Date.now(),
   log = (message) => console.warn(message),
@@ -132,6 +151,35 @@ export function createJarvisService({
   };
   const cache = new Map();
   const memo = new Map();
+  /** Radar mosaic times the snapshot has advertised, and their PNGs. */
+  const radar = { current: null, previous: null, images: new Map() };
+  /** FEMA flood-zone overlay: the day stamp and bbox the snapshot advertised. */
+  const floodzones = { current: null, images: new Map() };
+
+  /** Overpass across its public mirrors (they rate-limit and fail often). */
+  async function overpass(query) {
+    const body = `data=${encodeURIComponent(query)}`;
+    const opts = { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, timeoutMs: 15_000, maxBytes: 8 * 1024 * 1024 };
+    let lastError = null;
+    for (const url of [urls.overpass(), ...urls.overpassMirrors()]) {
+      try { return await http.json(url, opts); } catch (error) {
+        lastError = error;
+        log(`[jarvis] overpass ${new URL(url).hostname} failed (${reasonFor(error)})`);
+      }
+    }
+    throw lastError;
+  }
+
+  /** Nominatim fallback for safe places: one search per kind, ≥1.1 s apart (usage policy). */
+  async function nominatimSafePlaces(h) {
+    const bbox = nearBbox(h);
+    const out = [];
+    for (const [i, [kind, q]] of [['hospital', 'hospital'], ['police', 'police'], ['fire', 'fire station']].entries()) {
+      if (i > 0) await sleep(1_100);
+      out.push(...F.parseNominatimPlaces(await http.json(urls.nominatimSearch(q, bbox)), kind, h));
+    }
+    return out.sort((a, b) => a.distanceKm - b.distanceKm);
+  }
   const hydrated = new Set();
   let home = { value: undefined, error: null, at: 0, inflight: null };
 
@@ -202,7 +250,21 @@ export function createJarvisService({
     {
       id: 'weather.alerts', label: 'NWS alerts', group: 'local', kind: 'measured', ttlMs: MIN, staleMs: 10 * MIN, requiresHome: true,
       source: { name: 'National Weather Service', url: 'https://www.weather.gov/' },
-      run: async (h) => F.parseNwsAlerts(await retryOnce(() => http.json(urls.nwsAlerts(h), geo))),
+      run: async (h) => {
+        const alerts = F.parseNwsAlerts(await retryOnce(() => http.json(urls.nwsAlerts(h), geo)));
+        // Zone-based alerts carry no polygon; their outline is the zone's own
+        // published geometry (cached a day — zone borders don't move).
+        for (const alert of alerts.slice(0, 4)) {
+          if (alert.areas.length) continue;
+          for (const zone of alert.zones.slice(0, 3)) {
+            try {
+              const rings = await memoize(`zone:${zone}`, 24 * HOUR, async () => F.geometryRings((await http.json(zone, geo)).geometry));
+              alert.areas.push(...rings);
+            } catch (error) { log(`[jarvis] zone outline failed: ${error?.message || error}`); }
+          }
+        }
+        return alerts.map(({ zones, ...rest }) => rest);
+      },
     },
     {
       id: 'weather.now', label: 'Conditions', group: 'local', kind: 'measured', ttlMs: 5 * MIN, staleMs: 90 * MIN, requiresHome: true,
@@ -231,6 +293,106 @@ export function createJarvisService({
           retryOnce(() => http.json(meta.point.forecastUrl, geo)).then((p) => F.parseNwsDaily(p)).catch(() => null),
         ]);
         return { hourly, daily, office: meta.point.office, nearestPlace: meta.point.nearestPlace };
+      },
+    },
+    {
+      id: 'weather.radar', label: 'Radar', group: 'local', kind: 'measured', ttlMs: 3 * MIN, staleMs: 30 * MIN, requiresHome: true,
+      source: { name: 'NOAA MRMS base reflectivity', url: 'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer' },
+      observedAt: (d) => d.time,
+      run: async (h) => {
+        const meta = F.parseRadarMeta(await http.json(urls.radarMeta()));
+        const bbox = radarBbox(h);
+        if (radar.current && radar.current.timeMs !== meta.latestMs) radar.previous = radar.current;
+        radar.current = { timeMs: meta.latestMs, bbox };
+        return {
+          time: new Date(meta.latestMs).toISOString(),
+          timeMs: meta.latestMs,
+          bbox,
+          image: `/api/jarvis/radar.png?t=${meta.latestMs}`,
+        };
+      },
+    },
+    {
+      id: 'water.gauges', label: 'Rivers & tides', group: 'local', kind: 'measured', ttlMs: 5 * MIN, staleMs: 2 * HOUR, requiresHome: true,
+      source: { name: 'NOAA National Water Prediction Service', url: 'https://water.noaa.gov/' },
+      run: async (h) => F.parseNwpsGauges(await http.json(urls.nwpsGauges(regionBbox(h)), { timeoutMs: 20_000 }), h),
+    },
+    {
+      id: 'water.buoy', label: 'Sea state', group: 'local', kind: 'measured', ttlMs: 15 * MIN, staleMs: 3 * HOUR,
+      source: { name: 'NOAA NDBC buoy', url: 'https://www.ndbc.noaa.gov/' },
+      observedAt: (d) => d.at,
+      run: async () => {
+        const id = String(env.JARVIS_BUOY || DEFAULT_BUOY);
+        const b = F.parseNdbc(await http.text(urls.ndbcBuoy(id), { maxBytes: 2 * 1024 * 1024 }), { now: now() });
+        if (!b) throw new Error('Unexpected NDBC payload (no report in 6 h)');
+        return { ...b, station: id, url: `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(id)}` };
+      },
+    },
+    {
+      id: 'water.floodzones', label: 'FEMA flood zones', group: 'local', kind: 'modelled', ttlMs: 24 * HOUR, staleMs: 7 * 24 * HOUR, requiresHome: true,
+      source: { name: 'FEMA National Flood Hazard Layer', url: 'https://www.fema.gov/flood-maps/national-flood-hazard-layer' },
+      run: async (h) => {
+        const day = Math.floor(now() / 86_400_000);
+        const bbox = nearBbox(h);
+        floodzones.current = { day, bbox };
+        return { bbox, day, image: `/api/jarvis/floodzones.png?t=${day}` };
+      },
+    },
+    {
+      id: 'safety.places', label: 'Safe places & routes', group: 'local', kind: 'measured', ttlMs: 6 * HOUR, staleMs: 72 * HOUR, requiresHome: true, persist: true, background: true, retryMs: 10 * MIN,
+      source: { name: 'OpenStreetMap + FEMA shelters + OSRM routing', url: 'https://www.openstreetmap.org/' },
+      run: async (h) => {
+        let places;
+        let provider = 'overpass';
+        try {
+          places = F.parseSafePlaces(await overpass(safePlacesQuery(h)), h);
+        } catch (error) {
+          log(`[jarvis] overpass unavailable (${reasonFor(error)}); using Nominatim`);
+          provider = 'nominatim';
+          places = await nominatimSafePlaces(h);
+        }
+        let shelters = [];
+        try { shelters = F.parseFemaShelters(await http.json(urls.femaShelters(regionBbox(h)), { timeoutMs: 15_000 }), h); } catch (error) { log(`[jarvis] FEMA shelters failed: ${error?.message}`); }
+        const hospitals = F.pickRouteHospitals(places, 2);
+        const destinations = [...shelters.slice(0, 1), ...hospitals];
+        // Routes start from the coarsened home (~100 m) — the routing server never sees the address.
+        const origin = { lat: Number(h.lat.toFixed(3)), lon: Number(h.lon.toFixed(3)) };
+        let elevations = [];
+        try {
+          const pts = [origin, ...destinations];
+          elevations = F.parseElevations(await http.json(urls.elevation(pts)), pts.length);
+        } catch (error) { log(`[jarvis] elevation failed: ${error?.message}`); }
+        const routes = [];
+        for (const [i, d] of destinations.entries()) {
+          try {
+            const r = F.parseOsrmRoute(await http.json(urls.osrmRoute(origin, d), { timeoutMs: 15_000 }));
+            routes.push({ to: { name: d.name, kind: d.kind, lat: d.lat, lon: d.lon, elevationM: elevations[i + 1] ?? null }, ...r });
+          } catch (error) { log(`[jarvis] route to ${d.name} failed: ${error?.message}`); }
+        }
+        return { provider, places: places.slice(0, 40), openShelters: shelters.slice(0, 10), homeElevationM: elevations[0] ?? null, routes };
+      },
+    },
+    {
+      id: 'airspace.tfr', label: 'Flight restrictions', group: 'local', kind: 'measured', ttlMs: 15 * MIN, staleMs: 6 * HOUR,
+      source: { name: 'FAA TFR list', url: 'https://tfr.faa.gov/' },
+      run: async () => F.parseTfrList(await http.json(urls.tfrList()), TFR_STATES),
+    },
+    {
+      id: 'news.uap', label: 'Drone & UAP reports', group: 'news', kind: 'measured', ttlMs: 15 * MIN, staleMs: 6 * HOUR,
+      source: { name: 'Google News RSS (reports, unverified)', url: 'https://news.google.com/' },
+      run: async () => F.filterTitles(F.parseNewsRss(await http.text(urls.googleNews(REPORT_QUERIES.uap)), { limit: 25 }), REPORT_TITLE_FILTERS.uap).slice(0, 6),
+    },
+    {
+      id: 'news.finsec', label: 'Payments & banking incidents', group: 'news', kind: 'measured', ttlMs: 10 * MIN, staleMs: 6 * HOUR,
+      source: { name: 'Google News RSS', url: 'https://news.google.com/' },
+      run: async () => F.filterTitles(F.parseNewsRss(await http.text(urls.googleNews(REPORT_QUERIES.finsec)), { limit: 25 }), REPORT_TITLE_FILTERS.finsec).slice(0, 6),
+    },
+    {
+      id: 'news.power', label: 'Power outage reports', group: 'news', kind: 'measured', ttlMs: 10 * MIN, staleMs: 6 * HOUR, requiresHome: true,
+      source: { name: 'Google News RSS', url: 'https://news.google.com/' },
+      run: async (h) => {
+        const places = homePlaces(h, env.JARVIS_LOCAL_PLACES);
+        return F.filterTitles(F.parseNewsRss(await http.text(urls.googleNews(powerQuery(places, h?.state))), { limit: 25 }), REPORT_TITLE_FILTERS.power).slice(0, 6);
       },
     },
     {
@@ -283,7 +445,7 @@ export function createJarvisService({
       observedAt: (d) => d.updatedAt,
       run: async () => {
         const xml = await http.text(urls.faaStatus(), { headers: { Accept: 'application/xml' }, maxBytes: 1024 * 1024 });
-        return F.pickHomeAirports(parseNasStatusXml(xml, { now: now() }), HOME_AIRPORTS);
+        return { ...F.pickHomeAirports(parseNasStatusXml(xml, { now: now() }), HOME_AIRPORTS), points: AIRPORT_POINTS };
       },
     },
     {
@@ -645,6 +807,7 @@ export function createJarvisService({
     return {
       generatedAt: new Date(t).toISOString(),
       tookMs: t - started,
+      gaps: KNOWN_GAPS,
       home: publicHome(h),
       homeStatus: h ? 'ok' : (home.error || (env.JARVIS_HOME_ADDRESS || env.JARVIS_HOME_LAT ? 'pending' : 'not-configured')),
       session,
@@ -655,5 +818,41 @@ export function createJarvisService({
     };
   }
 
-  return { getSnapshot, resolveHome, feedIds: defs.map((d) => d.id), board };
+  /**
+   * The radar mosaic PNG for the time the snapshot advertised. Only that time
+   * (or the one before it, mid-refresh) is served, for the server's own bbox —
+   * the request can't steer the upstream query.
+   * @param {number} timeMs
+   * @returns {Promise<Uint8Array|null>}
+   */
+  async function getRadarImage(timeMs) {
+    const t = Number(timeMs);
+    if (!Number.isSafeInteger(t)) return null;
+    const allowed = [radar.current, radar.previous].filter(Boolean).find((r) => r.timeMs === t);
+    if (!allowed) return null;
+    const hit = radar.images.get(t);
+    if (hit) return hit;
+    const bytes = await fetchBytes(urls.radarExport(allowed.bbox, t), { timeoutMs: 20_000, maxBytes: 6 * 1024 * 1024 });
+    radar.images.set(t, bytes);
+    while (radar.images.size > 3) radar.images.delete(radar.images.keys().next().value);
+    return bytes;
+  }
+
+  /**
+   * The FEMA flood-zone PNG for the day stamp the snapshot advertised, over
+   * the server's own bbox. Cached for the day (the regulatory map rarely moves).
+   * @param {number} day
+   */
+  async function getFloodZoneImage(day) {
+    const d = Number(day);
+    if (!Number.isSafeInteger(d) || !floodzones.current || floodzones.current.day !== d) return null;
+    const hit = floodzones.images.get(d);
+    if (hit) return hit;
+    const bytes = await fetchBytes(urls.nfhlExport(floodzones.current.bbox), { timeoutMs: 25_000, maxBytes: 6 * 1024 * 1024 });
+    floodzones.images.clear();
+    floodzones.images.set(d, bytes);
+    return bytes;
+  }
+
+  return { getSnapshot, getRadarImage, getFloodZoneImage, resolveHome, feedIds: defs.map((d) => d.id), board };
 }

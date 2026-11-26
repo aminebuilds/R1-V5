@@ -5298,6 +5298,7 @@ function openAiRealtimeProxy() {
             'After receiving tool output, speak exactly one short confirmation. Do not repeat the confirmation.',
             'You may follow that one confirmation with ONE brief, directly relevant suggestion for a natural next step, drawn only from capabilities that actually apply to what just happened (e.g. after adding sites via search_business_sites, "Want the brief on one of them?"; after enabling a layer, a natural follow-on question it now answers). Offer it once, briefly, then wait for the user — never chain a further tool call on your own initiative, and never suggest something unrelated to the action just completed.',
             'For "show/open/turn on" layer requests, enable the matching layer. For "hide/close/turn off", disable it.',
+            'PROTECTION MODE: when the operator says "protection mode", "go into protection", "protect me", "watch my home", or asks to monitor everything relevant to them, call set_protection_mode{active:true} immediately — their home address is already configured, never ask for it. Then speak the result summary as the briefing (this replaces the one-short-confirmation rule for this tool): counts, then each act item title and action, in the result\'s words only. While protection mode is on, a system item of type protection_alert means a new act-level alert arrived: say its title and action once, briefly. "Stand down" or "turn off protection" calls set_protection_mode{active:false}.',
             // INSTRUCTION-ONLY mapping for the two globe-scale named views.
             //
             // Both are BROADER than the first-run tiles on purpose. A person
@@ -7031,6 +7032,20 @@ const R1_REALTIME_TOOLS = [
         enabled: { type: 'boolean', description: "true to enable visual rain/weather effects, false to disable." },
       },
       required: ['enabled'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'set_protection_mode',
+    description: "Protection mode: the operator's personal live watch on THEIR HOME. Call with active:true when they say \"protection mode\", \"go into protection\", \"protect me\", \"watch my home\" or \"watch the house\", \"what's happening around me / at home\", or ask to monitor everything relevant to them. It flies the globe to their home address (configured on the server; never ask for it), turns on every live layer around it (NOAA radar, NWS alert areas, traffic incidents, airports, flights, earthquakes, fires), checks every minute, and announces new act-level alerts. The result carries the live briefing: speak its summary as written, counts first, then each act item's title and action; add nothing it does not contain, and say so plainly if it lists unavailable feeds the operator asked about. Call with active:false to stand down.",
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        active: { type: 'boolean', description: 'true to enter protection mode, false to stand down.' },
+        view: { type: 'string', enum: ['home', 'area', 'metro'], description: "Opening view: 'home' (the street, ~1 km), 'area' (default, ~8 km), 'metro' (region, airports and radar)." },
+      },
+      required: ['active'],
     },
   },
 ];
@@ -9260,6 +9275,44 @@ function jarvisProxy() {
       } catch (error) {
         console.warn('[jarvis] snapshot failed:', error?.message || error);
         sendJson(502, { ok: false, error: 'Jarvis snapshot unavailable' });
+      }
+    });
+
+    // The NOAA radar mosaic for the map overlay. `t` must be a time the
+    // snapshot itself advertised; the bbox is the server's, never the client's.
+    middlewares.use('/api/jarvis/radar.png', async (req, res) => {
+      if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
+      if (!_jarvisRateLimiter(clientKey(req))) { res.writeHead(429); res.end(); return; }
+      const t = new URL(req.url || '', 'http://localhost').searchParams.get('t');
+      if (!/^\d{10,14}$/.test(String(t))) { res.writeHead(400); res.end(); return; }
+      try {
+        const bytes = await getService().getRadarImage(Number(t));
+        if (!bytes) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end(); return; }
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=600' });
+        res.end(Buffer.from(bytes));
+      } catch (error) {
+        console.warn('[jarvis] radar image failed:', error?.message || error);
+        res.writeHead(502, { 'Cache-Control': 'no-store' });
+        res.end();
+      }
+    });
+
+    // FEMA flood-zone overlay: same rule — only the day stamp the snapshot
+    // advertised, over the server's own bbox.
+    middlewares.use('/api/jarvis/floodzones.png', async (req, res) => {
+      if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
+      if (!_jarvisRateLimiter(clientKey(req))) { res.writeHead(429); res.end(); return; }
+      const t = new URL(req.url || '', 'http://localhost').searchParams.get('t');
+      if (!/^\d{4,6}$/.test(String(t))) { res.writeHead(400); res.end(); return; }
+      try {
+        const bytes = await getService().getFloodZoneImage(Number(t));
+        if (!bytes) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end(); return; }
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=3600' });
+        res.end(Buffer.from(bytes));
+      } catch (error) {
+        console.warn('[jarvis] flood-zone image failed:', error?.message || error);
+        res.writeHead(502, { 'Cache-Control': 'no-store' });
+        res.end();
       }
     });
   }

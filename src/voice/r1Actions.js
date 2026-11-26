@@ -360,6 +360,45 @@ export function resetActionRunner() {
 }
 
 /**
+ * `set_protection_mode`: open (or stand down) Jarvis protection on the
+ * operator's home. The result carries the live briefing so the model speaks
+ * the snapshot's own words — counts, titles, actions — and nothing else.
+ * The same function sits behind the card's Protect button and `?protect`.
+ * @param {{active?: boolean, view?: string}} args
+ * @param {{open: Function, close: Function, getBriefing: Function, isProtecting: Function}|null|undefined} jarvis
+ */
+export async function runProtectionMode(args, jarvis) {
+  const action = 'set_protection_mode';
+  if (!jarvis?.open) return { ok: false, action, error: 'Jarvis map mode is not available in this build.' };
+  if (args?.active === false) {
+    jarvis.close();
+    return { ok: true, action, active: false, summary: 'Protection mode off. The map is back to normal.' };
+  }
+  const view = ['home', 'area', 'metro'].includes(args?.view) ? args.view : 'area';
+  await jarvis.open({ view, protection: true });
+  const briefing = jarvis.getBriefing?.();
+  if (!briefing) {
+    return { ok: false, action, active: jarvis.isProtecting?.() ?? true, error: 'The live snapshot could not be read; protection mode is open and will retry every minute.' };
+  }
+  return {
+    ok: true,
+    action,
+    active: true,
+    view,
+    home: [briefing.place, briefing.state].filter(Boolean).join(', '),
+    asOf: briefing.generatedAt,
+    actCount: briefing.actCount,
+    watchCount: briefing.watchCount,
+    top: briefing.top,
+    conditions: briefing.conditions,
+    layersOn: briefing.layersOn,
+    monitoring: briefing.monitoring,
+    unavailable: briefing.unavailable,
+    summary: briefing.spoken,
+  };
+}
+
+/**
  * Turn a gate's live tanker count into the disruption index's `transits`
  * input: the app's own snapshot history, since AIS has no historical-transit
  * feed to draw on (see `disruptionClient.postDisruptionSnapshot`).
@@ -1523,6 +1562,10 @@ export function createR1ActionRunner({ viewer, styleManager, dataManager, sceneD
         sitesLayer.toggleHeatmap();
       }
       return { ok: true, action: 'toggle_competitive_heatmap', mode: mode || 'toggled' };
+    }
+
+    if (name === 'set_protection_mode') {
+      return runProtectionMode(args, globalThis.window?.__r1?.jarvis);
     }
 
     if (name === 'get_weather') {

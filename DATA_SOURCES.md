@@ -65,7 +65,8 @@ put in front of paying customers as-is.
 | Source | Used for | License / terms | Attribution |
 |--------|----------|-----------------|-------------|
 | **US Census Geocoder** | One-time geocode of `JARVIS_HOME_ADDRESS` (cached in `.r1-cache/jarvis/home.json`) | US Government work, public domain | "U.S. Census Bureau Geocoder" |
-| **National Weather Service API** (`api.weather.gov`) | Active alerts for the home point, latest station observation (measured), hourly and 12-hour forecast (modelled) | US Government work, public domain; NWS asks for an identifying User-Agent (sent) | "National Weather Service" |
+| **NOAA/NWS MRMS radar** (`mapservices.weather.noaa.gov` base-reflectivity ImageServer) | The radar overlay draped on the globe in Jarvis map mode: the newest ~2-minute mosaic for a fixed ~250 km window around the coarsened home point, served through `/api/jarvis/radar.png` | US Government work, public domain | "Radar: NOAA/NWS MRMS" |
+| **National Weather Service API** (`api.weather.gov`) | Active alerts for the home point (plus each alert's zone outlines for the map), latest station observation (measured), hourly and 12-hour forecast (modelled) | US Government work, public domain; NWS asks for an identifying User-Agent (sent) | "National Weather Service" |
 | **Open-Meteo Air Quality** (CAMS) | Current and 24 h peak US AQI — labelled **modelled** | CC BY 4.0, linked attribution required | "Weather data by Open-Meteo.com" (linked in the footer) |
 | **EPA AirNow** (optional, `AIRNOW_API_KEY`) | Monitor-measured AQI, replaces the modelled value when set | AirNow data-use guidelines; preliminary data | "U.S. EPA AirNow" |
 | **NOAA SWPC** | Space-weather R/S/G scales and planetary Kp | US Government work, public domain | "NOAA Space Weather Prediction Center" |
@@ -88,9 +89,19 @@ put in front of paying customers as-is.
 | **Hacker News (Algolia API)** | Tech front page; security stories flagged | HN API terms | "Hacker News" |
 | **Google News RSS** | Local, local-incident, macro, AI and tokenization headlines | Personal, non-commercial use only; publishers keep their rights | "Google News RSS" plus each linked publisher |
 | **GDELT DOC 2.0** `timelinetone` | 24 h vs 7-day average article tone per theme (one request per 5 s, refreshed hourly in the background) | Commercial use permitted with citation and link | "GDELT Project" (linked in the footer) |
+| **NOAA National Water Prediction Service** (`api.water.noaa.gov/nwps`) | River and tidal gauges within ~40 km: observed and forecast stage with the NWS flood category, drawn on the map by flood state | US Government work, public domain | "NOAA National Water Prediction Service" |
+| **NOAA NDBC buoy 44065** (`ndbc.noaa.gov` realtime2) | Sea state at the New York Harbor entrance: wave height, period, wind and gusts (`JARVIS_BUOY` overrides the station) | US Government work, public domain | "NOAA National Data Buoy Center" |
+| **FEMA National Flood Hazard Layer** (`hazards.fema.gov` NFHL MapServer) | Regulatory flood zones near home, draped on the map — a reference map, labelled modelled, not live water | US Government work, public domain | "FEMA National Flood Hazard Layer" |
+| **FEMA National Shelter System — open shelters** (`gis.fema.gov`) | Shelters currently OPEN within ~40 km (they open during declared emergencies) | US Government work, public domain | "FEMA National Shelter System" |
+| **FAA TFR list** (`tfr.faa.gov`) | Temporary flight restrictions in NJ and NY | US Government work, public domain | "FAA Temporary Flight Restrictions" |
+| **OpenStreetMap** via Overpass, falling back to **Nominatim** | Hospitals, police, fire stations and mapped emergency shelters within 8 km (refreshed every 6 h; Nominatim at ≤1 request/s per its usage policy) | ODbL 1.0; Overpass and Nominatim usage policies | "© OpenStreetMap contributors" |
+| **FOSSGIS OSRM** (`routing.openstreetmap.de`) | Pre-computed driving routes from home (rounded to ~100 m) to the nearest emergency hospitals / open shelter — routes do not know about flooded or closed roads, and say so | ODbL data; FOSSGIS fair-use policy | "Routing © OSRM / FOSSGIS, data © OpenStreetMap contributors" |
+| **Open-Meteo Elevation** (Copernicus DEM 90 m) | Elevation of home and route destinations, so a flood route can say "higher ground" truthfully | CC BY 4.0 (Open-Meteo); Copernicus DEM licence | "Elevation data by Open-Meteo.com, Copernicus DEM" |
 | **CISA KEV catalog** | Known-exploited vulnerabilities added in the last 10 days; consumer vendors flagged | US Government work, public domain | "CISA Known Exploited Vulnerabilities Catalog" |
 | **Reddit API** (optional, OAuth app-only) | Hot posts in a few subreddits | Reddit Data API terms; your own app credentials | "Reddit" |
 | **Bluesky / AT Protocol** (optional, app password) | Top posts for a few search terms, last 24 h | Bluesky developer guidelines | "Bluesky" |
+
+**Asked for, but no truthful live source exists** (each is listed in the console as unavailable with its reason, never approximated): live foot traffic (licensed: Placer.ai and similar; Google exposes no live busyness API), utility outage maps (PSE&G/JCP&L publish no API — outage *news reports* are shown instead), UFO/UAP sightings (NUFORC has no live API — FAA flight restrictions and drone/UAP *news reports* are shown instead), live crime incidents, and private or "hidden" bunkers (not public, not verifiable, not safe to route to — official shelters, hospitals, police and fire stations are shown instead).
 
 **Not wired, deliberately:** CNN's Fear & Greed endpoint rejects non-browser
 clients (HTTP 418) and is not an API, so it isn't spoofed. Reddit and Bluesky

@@ -155,6 +155,7 @@ function briefPanel(snap) {
       <div class="row1"><span class="lvl">${esc(i.level)}</span><span class="title">${i.url ? link(i.url, i.title) : esc(i.title)}</span><span class="dom micro">${esc(i.domain)}</span></div>
       <div class="action">${esc(i.action)}</div>
       ${i.evidence?.length ? `<div class="evidence">${i.evidence.map((e) => `<div><i class="mk ${esc(e.kind)}"></i><span>${esc(e.text)}${e.source ? ` <span class="ink2">— ${esc(e.source)}${e.at ? `, ${esc(ago(e.at))}` : ''}</span>` : ''}</span></div>`).join('')}</div>` : ''}
+      ${i.playbook?.length ? `<div class="playbook"><span class="micro">Playbook · guidance, not data</span><ol>${i.playbook.map((s) => `<li>${esc(s)}</li>`).join('')}</ol></div>` : ''}
     </li>`).join('')}</ul>` : '<div class="empty">Nothing needs your attention from the feeds that are live. Unavailable feeds are listed under Provenance.</div>';
   state.renderedBrief = next;
   const counts = ['act', 'watch', 'info'].map((l) => `${items.filter((i) => i.level === l).length} ${l}`).join(' · ');
@@ -446,6 +447,67 @@ function cyberPanel(f) {
   return plate('Cyber', [kev], b);
 }
 
+const FLOOD_WORD = { no_flooding: 'Normal', action: 'Action stage', minor: 'Minor flood', moderate: 'Moderate flood', major: 'Major flood' };
+const FLOOD_RANK = { no_flooding: 0, action: 1, minor: 2, moderate: 3, major: 4 };
+
+function waterPanel(f) {
+  const g = f['water.gauges'];
+  const b = f['water.buoy'];
+  const z = f['water.floodzones'];
+  let body = `<div class="sub">Rivers &amp; tides within 40 km ${chip(g)}</div>`;
+  if (has(g)) {
+    const rank = (x) => Math.max(FLOOD_RANK[x.observed.category] ?? 0, FLOOD_RANK[x.forecast.category] ?? 0);
+    const list = [...g.data].sort((a, c) => rank(c) - rank(a) || a.distanceKm - c.distanceKm).slice(0, 8);
+    body += `<ul class="rows">${list.map((x) => {
+      const r = rank(x);
+      const cls = r >= 3 ? 'down' : r >= 1 ? 'flag' : 'dim';
+      const fc = (FLOOD_RANK[x.forecast.category] ?? 0) > (FLOOD_RANK[x.observed.category] ?? 0) && isNum(x.forecast.stage)
+        ? ` → ${FLOOD_WORD[x.forecast.category]} ${x.forecast.stage} ${x.forecast.unit} ${fmtEt(x.forecast.at, { day: true })}` : '';
+      return `<li><span>${link(x.url, x.name)}<span class="s2">${esc(x.distanceKm)} km${x.tidal ? ' · tidal' : ''}</span></span><span class="r"><span class="${cls}">${esc(FLOOD_WORD[x.observed.category] || x.observed.category || '—')}</span>${isNum(x.observed.stage) ? ` ${x.observed.stage} ${esc(x.observed.unit)}` : ''}${esc(fc)}</span></li>`;
+    }).join('')}</ul>`;
+  } else body += why(g, 'gauges');
+  body += `<div class="sub">Sea state · harbor entrance ${chip(b)}</div>`;
+  body += has(b) ? `<div class="readouts">
+      <div class="ro"><div class="l">Waves</div><div class="v sm">${fix(b.data.waveHeightFt, 1)}<small>ft</small></div></div>
+      <div class="ro"><div class="l">Period</div><div class="v sm">${fix(b.data.dominantPeriodS, 0)}<small>s</small></div></div>
+      <div class="ro"><div class="l">Wind</div><div class="v sm">${fix(b.data.windKt, 0)}<small>kt ${esc(b.data.windFrom || '')}</small></div></div>
+      <div class="ro"><div class="l">Gust</div><div class="v sm">${fix(b.data.gustKt, 0)}<small>kt</small></div></div>
+      <div class="ro"><div class="l">Water</div><div class="v sm">${fix(b.data.waterTempF, 0)}<small>°F</small></div></div></div>
+      <div class="micro" style="margin-top:6px">${link(b.data.url, `NDBC ${b.data.station}`)} · ${esc(fmtEt(b.data.at))} ET</div>` : why(b, 'buoy');
+  body += `<div class="note">FEMA flood zones ${has(z) ? 'are drawn on the map in Jarvis map mode (regulatory reference, modelled — not live water).' : `are unavailable (${esc(z?.reason || 'loading')}).`}</div>`;
+  return plate('Water', [g, b], body);
+}
+
+function safetyPanel(f) {
+  const s = f['safety.places'];
+  if (!has(s)) return plate('Safe places & routes', [s], why(s, 'safe places (OpenStreetMap)'));
+  const d = s.data;
+  const nearest = (kind) => d.places.find((p) => p.kind === kind);
+  let body = d.routes.length ? `<div class="sub">Pre-planned routes from home</div><ul class="rows">${d.routes.map((r) => `<li><span>${esc(r.to.name)}<span class="s2">${esc(r.to.kind)}${isNum(r.to.elevationM) ? ` · ${r.to.elevationM} m elevation` : ''}</span></span><span class="r">${esc(r.durationMin)} min · ${esc(r.distanceKm)} km</span></li>`).join('')}</ul>
+    <div class="note">Driving routes from OSRM on OpenStreetMap roads. They do not know which roads are flooded or closed. Home elevation ${isNum(d.homeElevationM) ? `${d.homeElevationM} m` : 'unknown'} (Copernicus DEM).</div>` : '<div class="empty">No route could be computed.</div>';
+  body += `<div class="sub">Nearest</div><ul class="rows">${['hospital', 'police', 'fire'].map((k) => nearest(k)).filter(Boolean).map((p) => `<li><span>${link(p.osm, p.name)}<span class="s2">${esc(p.kind)}</span></span><span class="r">${esc(p.distanceKm)} km</span></li>`).join('')}</ul>`;
+  body += `<div class="sub">FEMA open shelters</div>${d.openShelters.length ? `<ul class="rows">${d.openShelters.map((x) => `<li><span>${esc(x.name)}<span class="s2">${esc(x.address)}</span></span><span class="r">${esc(x.distanceKm)} km</span></li>`).join('')}</ul>` : '<div class="empty">No FEMA shelters are open within 40 km. They open during declared emergencies.</div>'}`;
+  body += `<div class="micro" style="margin-top:6px">Places: ${esc(d.provider === 'nominatim' ? 'OpenStreetMap via Nominatim (Overpass was unavailable)' : 'OpenStreetMap via Overpass')}</div>`;
+  return plate('Safe places & routes', [s], body);
+}
+
+function reportsPanel(f, gaps) {
+  const tfr = f['airspace.tfr'];
+  let body = `<div class="sub">FAA flight restrictions · NJ/NY ${chip(tfr)}</div>`;
+  body += has(tfr) ? (tfr.data.length ? `<ul class="rows">${tfr.data.map((t) => `<li><span>${link(t.url, t.description)}<span class="s2">${esc(t.type || 'TFR')} · NOTAM ${esc(t.id)}</span></span><span class="r">${esc(t.state)}</span></li>`).join('')}</ul>` : '<div class="empty">No active flight restrictions in NJ or NY.</div>') : why(tfr, 'TFRs');
+  for (const [id, title, empty] of [
+    ['news.power', 'Power outage reports', 'No outage reports naming your area in 24 h.'],
+    ['news.uap', 'Drone / UAP reports (unverified)', 'No drone or UAP reports naming New Jersey in 7 days.'],
+    ['news.finsec', 'Payments & banking incidents', 'No bank or payment-network incidents in the headlines today.'],
+  ]) {
+    body += `<div class="sub">${esc(title)} ${chip(f[id])}</div>${newsRows(f[id], empty)}`;
+  }
+  if (gaps?.length) {
+    body += `<div class="sub">Not available — and why</div><ul class="rows">${gaps.map((g) => `<li style="grid-template-columns:1fr"><span>${esc(g.label)}<span class="s2">${esc(g.reason)}</span></span></li>`).join('')}</ul>`;
+  }
+  return plate('Airspace & reports', [tfr], body);
+}
+
 function headlinesPanel(f) {
   const tab = state.tabs.headlines;
   const feed = f[`news.${tab}`];
@@ -479,9 +541,9 @@ function render() {
   app.innerHTML = `${homeBanner}
     <div class="situation ${act ? 'act' : watch ? 'watch' : ''}"><b>${act} act · ${watch} watch</b>${snap.situation ? ` — ${esc(snap.situation)}` : ''}${state.error ? ` <span class="kind failed">· last refresh failed (${esc(state.error)}), showing ${esc(ago(state.lastOk))}</span>` : ''}</div>
     <div class="grid">
-      <div class="col c1">${briefPanel(snap)}${conditionsPanel(f)}${forecastPanel(f)}${mobilityPanel(f)}${localNewsPanel(f)}</div>
+      <div class="col c1">${briefPanel(snap)}${conditionsPanel(f)}${waterPanel(f)}${safetyPanel(f)}${forecastPanel(f)}${mobilityPanel(f)}${localNewsPanel(f)}</div>
       <div class="col c2">${marketsPanel(snap)}${regimePanel(f)}${ratesPanel(f)}${macroPanel(f)}${hazardsPanel(f)}</div>
-      <div class="col c3">${sentimentPanel(f)}${narrativesPanel(f)}${attentionPanel(f)}${headlinesPanel(f)}${cyberPanel(f)}${socialPanel(f)}</div>
+      <div class="col c3">${reportsPanel(f, snap.gaps)}${sentimentPanel(f)}${narrativesPanel(f)}${attentionPanel(f)}${headlinesPanel(f)}${cyberPanel(f)}${socialPanel(f)}</div>
     </div>
     ${provenancePanel(snap)}
     <div class="foot">Every figure is labelled measured (published observation or price), modelled (forecast or model output), or unavailable with the reason. Nothing is filled in.

@@ -1,0 +1,139 @@
+/* Jarvis map mode — one compact card over the scene (DESIGN-V5: opaque
+   plate, hairlines, mono numerics, colour only for state from the data). */
+
+/* While Jarvis is open the map carries the information: the heavy side
+   panels step aside and come back on close. */
+body.r1-jarvis-mode #left-panel-stack,
+body.r1-jarvis-mode #right-context-rail,
+body.r1-jarvis-mode #first-run-launcher,
+body.r1-jarvis-mode #explain-reopen {
+  display: none !important;
+}
+
+#jarvis-card {
+  position: fixed;
+  top: 96px;
+  right: 16px;
+  z-index: 140;
+  width: 300px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  background: var(--plate, #0D1216);
+  border: 1px solid var(--glass-border, #2E3941);
+  border-radius: var(--overlay-radius, 3px);
+  box-shadow: var(--shadow-overlay, 0 24px 48px -12px rgba(0, 0, 0, .72));
+  color: var(--text-primary, #E4EAEE);
+  font: 400 12px/1.45 var(--font-sans, 'Archivo', sans-serif);
+}
+
+#jarvis-card header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-bottom: 1px solid var(--line, #1C242B);
+}
+#jarvis-card .jv-id {
+  font: 600 10px/1 var(--font-mono, monospace); letter-spacing: 0.20em; text-transform: uppercase;
+}
+#jarvis-card .jv-place {
+  font: 500 9px/1 var(--font-mono, monospace); letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--text-dim, #5A6670); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#jarvis-card .jv-x {
+  margin-left: auto; width: 22px; height: 22px; border: 1px solid var(--glass-border, #2E3941);
+  border-radius: 2px; background: transparent; color: var(--text-dim, #5A6670); cursor: pointer; line-height: 1;
+}
+#jarvis-card .jv-x:hover { background: var(--plate-hi, #121A20); color: var(--text-primary, #E4EAEE); }
+
+#jarvis-card .jv-status {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 12px; border-bottom: 1px solid var(--line, #1C242B);
+  box-shadow: inset 2px 0 0 var(--text-ghost, #39434B);
+  font: 400 10px/1 var(--font-mono, monospace); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim, #5A6670);
+  font-variant-numeric: tabular-nums;
+}
+#jarvis-card .jv-status b { color: var(--text-primary, #E4EAEE); font-weight: 500; }
+#jarvis-card .jv-status.act { box-shadow: inset 2px 0 0 var(--alert, #FF6A45); }
+#jarvis-card .jv-status.watch { box-shadow: inset 2px 0 0 var(--caution, #F2B33D); }
+
+#jarvis-card .jv-brief { list-style: none; margin: 0; padding: 4px 0; border-bottom: 1px solid var(--line, #1C242B); }
+#jarvis-card .jv-brief li { padding: 0 12px 0 14px; box-shadow: inset 2px 0 0 var(--text-ghost, #39434B); }
+#jarvis-card .jv-brief li.act { box-shadow: inset 2px 0 0 var(--alert, #FF6A45); }
+#jarvis-card .jv-brief li.watch { box-shadow: inset 2px 0 0 var(--caution, #F2B33D); }
+#jarvis-card .jv-brief button,
+#jarvis-card .jv-brief span {
+  display: block; width: 100%; padding: 6px 0; border: 0; background: none; text-align: left;
+  font: 500 12px/1.35 var(--font-sans, sans-serif); color: var(--text-primary, #E4EAEE);
+}
+#jarvis-card .jv-brief button { cursor: pointer; }
+#jarvis-card .jv-brief button:hover { color: #fff; text-decoration: underline; text-decoration-color: var(--text-dim, #5A6670); text-underline-offset: 2px; }
+
+#jarvis-card .jv-read {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px 0;
+  font: 400 11px/1.4 var(--font-mono, monospace); color: var(--text-secondary, #8B98A3); font-variant-numeric: tabular-nums;
+}
+#jarvis-card .jv-read b { color: var(--text-primary, #E4EAEE); font-weight: 500; }
+#jarvis-card .jv-read b.up { color: var(--signal, #62E0A8); }
+#jarvis-card .jv-read b.down { color: var(--alert, #FF6A45); }
+#jarvis-card .jv-dim { color: var(--text-dim, #5A6670); }
+
+#jarvis-card .jv-row { display: flex; align-items: center; gap: 10px; padding: 12px 12px 0; }
+#jarvis-card .jv-l {
+  font: 500 9px/1 var(--font-mono, monospace); letter-spacing: 0.24em; text-transform: uppercase; color: var(--text-dim, #5A6670);
+}
+#jarvis-card .jv-seg { display: inline-flex; border: 1px solid var(--glass-border, #2E3941); border-radius: 2px; }
+#jarvis-card .jv-seg button {
+  height: 24px; padding: 0 10px; border: 0; border-right: 1px solid var(--line, #1C242B); background: transparent; cursor: pointer;
+  font: 500 9.5px/1 var(--font-mono, monospace); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim, #5A6670);
+}
+#jarvis-card .jv-seg button:last-child { border-right: 0; }
+#jarvis-card .jv-seg button:hover { background: var(--plate-hi, #121A20); color: var(--text-primary, #E4EAEE); }
+#jarvis-card .jv-seg button[aria-pressed="true"] { background: var(--text-primary, #E4EAEE); color: var(--bg-dark, #06080A); }
+
+#jarvis-card .jv-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 12px; }
+#jarvis-card .jv-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px;
+  border: 1px solid var(--glass-border, #2E3941); border-radius: 2px; background: transparent; cursor: pointer;
+  font: 500 9.5px/1 var(--font-mono, monospace); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim, #5A6670);
+}
+#jarvis-card .jv-chip i { width: 5px; height: 5px; flex: none; background: var(--text-ghost, #39434B); }
+#jarvis-card .jv-chip[aria-pressed="true"] { color: var(--text-primary, #E4EAEE); border-color: var(--glass-border-hover, #3A4750); }
+#jarvis-card .jv-chip[aria-pressed="true"].live i { background: var(--signal, #62E0A8); }
+#jarvis-card .jv-chip[aria-pressed="true"].stale i { background: transparent; outline: 1px solid var(--caution, #F2B33D); outline-offset: -1px; }
+#jarvis-card .jv-chip.loading i { background: var(--caution, #F2B33D); }
+#jarvis-card .jv-chip.none { opacity: 0.5; cursor: not-allowed; text-decoration: line-through; }
+#jarvis-card .jv-chip:not(:disabled):hover { background: var(--plate-hi, #121A20); }
+#jarvis-card button:focus-visible { outline: 1px solid var(--signal, #62E0A8); outline-offset: -2px; }
+
+#jarvis-card footer {
+  padding: 8px 12px; border-top: 1px solid var(--line, #1C242B);
+  font: 400 9.5px/1.4 var(--font-mono, monospace); letter-spacing: 0.06em; color: var(--text-dim, #5A6670);
+}
+#jarvis-card footer a { color: var(--text-secondary, #8B98A3); }
+#jarvis-card .jv-empty { padding: 12px; font: 400 11px/1.5 var(--font-mono, monospace); color: var(--text-dim, #5A6670); }
+
+#jarvis-toggle[aria-pressed="true"] { background: var(--text-primary, #E4EAEE); color: var(--bg-dark, #06080A); }
+
+#jarvis-card .jv-min { margin-left: auto; }
+#jarvis-card .jv-min + .jv-x { margin-left: 6px; }
+@media (max-width: 640px) {
+  #jarvis-card { top: 84px; right: 8px; width: calc(100vw - 16px); max-height: calc(100vh - 200px); }
+}
+
+#jarvis-card .jv-protect {
+  height: 22px; padding: 0 10px; margin-left: auto; border: 1px solid var(--glass-border, #2E3941); border-radius: 2px;
+  background: transparent; cursor: pointer; color: var(--text-secondary, #8B98A3);
+  font: 500 9.5px/1 var(--font-mono, monospace); letter-spacing: 0.16em; text-transform: uppercase;
+}
+#jarvis-card .jv-protect:hover { background: var(--plate-hi, #121A20); color: var(--text-primary, #E4EAEE); }
+#jarvis-card .jv-protect[aria-pressed="true"] { background: var(--text-primary, #E4EAEE); color: var(--bg-dark, #06080A); border-color: var(--text-primary, #E4EAEE); }
+#jarvis-card .jv-protect + .jv-min { margin-left: 6px; }
+#jarvis-card .jv-new {
+  padding: 6px 12px; border-bottom: 1px solid var(--line, #1C242B); box-shadow: inset 2px 0 0 var(--alert, #FF6A45);
+  font: 500 11px/1.4 var(--font-sans, sans-serif); color: var(--text-primary, #E4EAEE);
+}
+#jarvis-card .jv-new span { float: right; font: 400 10px/1.4 var(--font-mono, monospace); color: var(--text-dim, #5A6670); }
+#jarvis-card .jv-step { display: block; margin: -2px 0 6px; font: 400 11px/1.4 var(--font-sans, sans-serif); color: var(--text-secondary, #8B98A3); }
+#jarvis-card .jv-link {
+  padding: 0; border: 0; background: none; cursor: pointer; color: var(--text-primary, #E4EAEE);
+  font: inherit; text-decoration: underline; text-decoration-color: var(--text-dim, #5A6670); text-underline-offset: 2px;
+}
+#jarvis-card .jv-live b { color: var(--text-secondary, #8B98A3); font-weight: 500; font-variant-numeric: tabular-nums; }

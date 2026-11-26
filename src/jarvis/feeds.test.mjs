@@ -196,3 +196,32 @@ test('USGS quakes split into near-home and global-major', () => {
   assert.deepEqual(out.near.map((x) => x.id), ['nj']);
   assert.deepEqual(out.major.map((x) => x.id), ['reunion']);
 });
+
+test('alert geometry becomes thinned outer rings; zone URLs are kept for lookup', () => {
+  const square = [[-74.3, 40.7], [-74.1, 40.7], [-74.1, 40.8], [-74.3, 40.8], [-74.3, 40.7]];
+  assert.deepEqual(F.geometryRings({ type: 'Polygon', coordinates: [square] }), [square]);
+  assert.equal(F.geometryRings({ type: 'MultiPolygon', coordinates: [[square], [square]] }).length, 2);
+  assert.deepEqual(F.geometryRings(null), []);
+  const long = Array.from({ length: 1000 }, (_, i) => [-74 + i / 1000, 40.7]);
+  assert.equal(F.geometryRings({ type: 'Polygon', coordinates: [long] }, 50)[0].length, 50);
+  const [alert] = F.parseNwsAlerts({ features: [{ geometry: null, properties: {
+    id: 'a', event: 'Wind Advisory', severity: 'Moderate', status: 'Actual', messageType: 'Alert',
+    affectedZones: ['https://api.weather.gov/zones/forecast/NJZ999', 'https://evil.example.com/zone'],
+  } }] });
+  assert.deepEqual(alert.areas, []);
+  assert.deepEqual(alert.zones, ['https://api.weather.gov/zones/forecast/NJZ999']);
+});
+
+test('radar metadata gives the newest mosaic time', () => {
+  assert.deepEqual(F.parseRadarMeta({ timeInfo: { timeExtent: [1795702452000, 1795709215000] } }), { latestMs: 1795709215000, earliestMs: 1795702452000 });
+  assert.throws(() => F.parseRadarMeta({}), /Unexpected/);
+});
+
+test('incidents carry the point nearest home and their thinned road geometry', () => {
+  const [inc] = F.parseTomTomIncidents({ incidents: [{
+    geometry: { type: 'LineString', coordinates: [[-74.2, 40.75], [-74.17, 40.736], [-74.15, 40.73]] },
+    properties: { id: 'x', iconCategory: 8, magnitudeOfDelay: 4 },
+  }] }, HOME);
+  assert.deepEqual([inc.lon, inc.lat], [-74.17, 40.736]);
+  assert.equal(inc.path.length, 3);
+});

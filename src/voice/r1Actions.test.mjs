@@ -14,6 +14,7 @@ import {
   cctvVoiceFocusOutcome,
   formatTrackedEntityLabel,
   knownRadioLocation,
+  runProtectionMode,
 } from './r1Actions.js';
 
 test('track_entity narration names aircraft callsign → registration → icao24', () => {
@@ -3094,3 +3095,31 @@ test('voice runner: control_weather_effects dispatches weather event', async () 
 });
 
 
+
+test('set_protection_mode opens protection on home and returns the snapshot briefing', async () => {
+  const calls = [];
+  const jarvis = {
+    open: async (opts) => { calls.push(['open', opts]); },
+    close: () => calls.push(['close']),
+    isProtecting: () => true,
+    getBriefing: () => ({
+      place: 'Example', state: 'NJ', generatedAt: '2026-11-26T16:21:00Z', actCount: 1, watchCount: 2,
+      top: [{ level: 'act', title: 'Wind Advisory', action: 'Use caution.' }], conditions: null,
+      layersOn: ['radar', 'alerts'], monitoring: 'Checks every 60 s; new act-level alerts are announced.', unavailable: [],
+      spoken: 'Protection mode on at Example, NJ. 1 to act on, 2 to watch.',
+    }),
+  };
+  const on = await runProtectionMode({ active: true, view: 'nowhere' }, jarvis);
+  assert.deepEqual(calls[0], ['open', { view: 'area', protection: true }]);
+  assert.equal(on.ok, true);
+  assert.equal(on.home, 'Example, NJ');
+  assert.equal(on.actCount, 1);
+  assert.equal(on.summary, 'Protection mode on at Example, NJ. 1 to act on, 2 to watch.');
+  const off = await runProtectionMode({ active: false }, jarvis);
+  assert.deepEqual(calls.at(-1), ['close']);
+  assert.equal(off.active, false);
+  assert.equal((await runProtectionMode({ active: true }, null)).ok, false);
+  const noSnap = await runProtectionMode({ active: true, view: 'home' }, { ...jarvis, getBriefing: () => null });
+  assert.equal(noSnap.ok, false);
+  assert.match(noSnap.error, /retry/);
+});

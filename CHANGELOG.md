@@ -30,6 +30,37 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
   Configure with `JARVIS_HOME_ADDRESS` (see `.env.example`).
 
+- **Jarvis on the globe.** The top-bar target button or `?jarvis`
+  (`?jarvis=home|area|metro`) flies the photorealistic globe to your home and
+  draws only live data on the map: the NOAA MRMS radar mosaic draped over the
+  3D city, NWS alert areas (the zone outlines), TomTom incidents on their own
+  roads, and EWR/LGA/JFK/TEB coloured by FAA status, with 1 km and 5 km rings.
+  One compact card carries the top three brief items, a few readouts, three
+  views (Home, Area, Metro) and layer toggles; it collapses to one line. The
+  side panels step aside while it is open. The app's traffic-flow dots are
+  deliberately not used here: their positions are illustrative, not vehicles.
+
+- **Protection mode — say it and it happens.** "Protection mode", "protect
+  me" or "watch my home" (voice or typed chat — one new tool,
+  `set_protection_mode`), the card's Protect button, or `?protect` flies to the
+  configured home, turns every live layer on, refreshes every 30 s with a
+  visible countdown, and speaks the live briefing. New act-level alerts are
+  announced aloud while a voice session is connected (desktop notification when
+  the browser already allows it).
+- **Water, safety and airspace on the map.** NOAA river and tidal gauges
+  coloured by NWS flood stage (observed → forecast), the harbor-entrance buoy's
+  sea state, FEMA flood zones draped near home, hospitals / police / fire
+  stations and any FEMA shelter that is open, a pre-computed driving route to
+  the nearest emergency hospital (with both elevations, and the warning that
+  the route does not know which roads are flooded), FAA flight restrictions in
+  NJ/NY, and the app's military-aircraft layer.
+- **Playbooks on live triggers.** Flood, power, payments/banking, cyber, quake,
+  cold, heat and air-quality items carry a short procedure (Ready.gov/FEMA/NWS
+  guidance), shown as guidance, not data.
+- **Honest gaps.** Foot traffic, utility outage maps, UFO sightings, live
+  crime and private bunkers have no truthful live source; the console lists
+  each with the reason instead of approximating it.
+
 - **Time slider: the last seven days, not just now.** Open it from the clock
   button in the top action bar, from `?time`, or parked at a moment with
   `?at=-36h` (also `-2d`, an ISO time, or epoch ms). Drag the cursor, step an

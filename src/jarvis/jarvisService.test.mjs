@@ -98,3 +98,26 @@ test('reason vocabulary', () => {
   assert.equal(reasonFor(Object.assign(new Error('aborted'), { name: 'AbortError' })), 'timeout');
   assert.equal(reasonFor(new Error('Unexpected NWS alerts payload')), 'bad-payload');
 });
+
+test('the radar image is served only for the time the snapshot advertised', async () => {
+  const requested = [];
+  const fetchText = async (url) => {
+    if (url.includes('ImageServer?f=json')) return JSON.stringify({ timeInfo: { timeExtent: [1, 1795709215000] } });
+    throw new HttpError(503);
+  };
+  const fetchBytes = async (url) => { requested.push(url); return new Uint8Array([137, 80, 78, 71]); };
+  const svc = createJarvisService({ env: { JARVIS_HOME_LAT: '40.73', JARVIS_HOME_LON: '-74.16' }, fetchText, fetchBytes, log: () => {} });
+  const snap = await svc.getSnapshot({ deadlineMs: 2000 });
+  const radar = snap.feeds['weather.radar'];
+  assert.equal(radar.kind, 'measured');
+  assert.equal(radar.data.image, '/api/jarvis/radar.png?t=1795709215000');
+  assert.deepEqual(radar.data.bbox, { west: -75.7, south: 39.8, east: -72.7, north: 41.6 });
+  assert.equal(await svc.getRadarImage(123), null);
+  assert.equal(requested.length, 0);
+  const bytes = await svc.getRadarImage(1795709215000);
+  assert.equal(bytes.length, 4);
+  assert.equal(requested.length, 1);
+  assert.match(requested[0], /bbox=-75\.7%2C39\.8%2C-72\.7%2C41\.6/);
+  await svc.getRadarImage(1795709215000);
+  assert.equal(requested.length, 1, 'second request is served from cache');
+});

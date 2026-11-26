@@ -60,6 +60,8 @@ The data proxies in `vite.config.js` are written so the browser cannot turn the 
 
 - **Fixed hosts only.** Every upstream URL is built in `src/jarvis/sources.js` and checked against an explicit host allowlist before the request *and* again on the post-redirect URL. Nothing in the request (there are no parameters) reaches an upstream.
 - **Home location is sensitive.** The snapshot response contains the operator's geocoded home point. `JARVIS_HOME_ADDRESS` lives only in `.env`; the street address is sent once to the US Census geocoder and the result is cached in `.r1-cache/jarvis/` (gitignored). Every other upstream receives the point rounded to two decimals (~1 km). Do **not** expose this endpoint beyond localhost without auth — anyone who can reach it can read where you live.
+- **Who sees the home point.** Overpass, Nominatim and the elevation API get a ~1 km box or the point rounded to 3 decimals; OSRM routes start from the point rounded to ~100 m. The flood-zone image endpoint, like the radar one, serves only the day stamp the snapshot advertised over the server's own bbox.
+- **Radar image.** `/api/jarvis/radar.png?t=` serves only a mosaic time the snapshot itself advertised, for the server's own bbox; any other `t` is a 404 and never reaches NOAA.
 - **Bounded.** 40 requests/min per client, per-feed timeouts and byte caps, and per-feed caches so a reload never fans out to every upstream.
 
 ## Network exposure — the operator threat model

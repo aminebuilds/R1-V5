@@ -915,6 +915,22 @@ export class R1RealtimeController {
     }, 'client.map_event');
   }
 
+  /**
+   * A background event the operator should HEAR — a new protection-mode
+   * alert. Same data hygiene as notifyMapEvent (the payload is serialized
+   * JSON, never prose), plus one queued spoken response. queueResponseCreate
+   * already defers while a response is active and refuses during a user turn,
+   * so this never talks over the operator.
+   * @param {object} payload
+   * @param {string} instruction What to say about it, in one line.
+   * @returns {boolean} False when no voice session is open.
+   */
+  announceEvent(payload, instruction) {
+    if (!this.notifyMapEvent(payload)) return false;
+    this.queueResponseCreate(instruction);
+    return true;
+  }
+
   sendTextCommand(text) {
     if (!this.dc || this.dc.readyState !== 'open') {
       throw new Error('R1 voice is not connected');
@@ -2026,6 +2042,11 @@ function hasStructuredViewIdentity(result) {
 }
 
 function responseInstructionForToolResult(result) {
+  if (result?.action === 'set_protection_mode') {
+    if (result.active === false) return 'Say exactly: “Protection mode off.”';
+    if (!result.ok) return 'In one sentence, say protection mode is open but the live briefing could not be read yet, and that it will retry every minute.';
+    return 'Speak result.summary as the briefing, in its own words and order: counts first, then each act item title and action, then watch titles. Do not add, estimate or embellish anything it does not contain. End with “Watching.”';
+  }
   if (result?.action === 'control_radio' && result.radioPlaybackSuppressed) {
     if (result.audioState === 'paused') {
       return 'Briefly confirm the completed Radio action, then say that Radio remains paused as requested. Do not say the request was cancelled or that Radio is playing.';

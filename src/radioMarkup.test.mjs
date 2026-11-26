@@ -21,11 +21,11 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 53-tool inventory', () => {
+test('Realtime schema exposes the authoritative 54-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 53);
+  assert.equal(tools.length, 54);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 53, 'tool names are unique');
+  assert.equal(new Set(names).size, 54, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
@@ -52,6 +52,10 @@ test('Realtime schema exposes the authoritative 53-tool inventory', () => {
   ]) {
     assert.ok(names.includes(name), `${name} must be in the shipped inventory`);
   }
+  // Jarvis protection mode: "protection mode" by voice or chat opens the
+  // operator's home watch — the same function as the card's Protect button.
+  assert.ok(names.includes('set_protection_mode'));
+  assert.deepEqual(tools.find((tool) => tool.name === 'set_protection_mode').parameters.required, ['active']);
   // Creating an offer and publishing it are two decisions, and the schema is
   // where that separation is load-bearing: one tool builds, another pushes.
   assert.ok(
@@ -252,6 +256,9 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'recommend_offer',
     'create_offer',
     'deploy_offer',
+    // New in the Jarvis protection-mode build: appended at the end, touching
+    // no existing tool — the unmoved digest below is the proof.
+    'set_protection_mode',
   ]);
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))

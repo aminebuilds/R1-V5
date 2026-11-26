@@ -245,4 +245,6 @@ table.t tr:last-child td { border-bottom: 0; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
 
+.brief .playbook { margin: 10px 0 0 56px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 2px; background: var(--plate-sunk); }
+.brief .playbook ol { margin: 6px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.55; }
 .note { margin-top: 10px; font: 400 10.5px/1.55 var(--font-mono); color: var(--text-dim); letter-spacing: 0.02em; }

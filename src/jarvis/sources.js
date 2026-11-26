@@ -24,6 +24,18 @@ export const JARVIS_ALLOWED_HOSTS = Object.freeze(new Set([
   'www.nhc.noaa.gov',
   'www.fema.gov',
   'nasstatus.faa.gov',
+  'mapservices.weather.noaa.gov',
+  'api.water.noaa.gov',
+  'www.ndbc.noaa.gov',
+  'hazards.fema.gov',
+  'gis.fema.gov',
+  'tfr.faa.gov',
+  'overpass-api.de',
+  'overpass.private.coffee',
+  'overpass.kumi.systems',
+  'nominatim.openstreetmap.org',
+  'routing.openstreetmap.de',
+  'api.open-meteo.com',
   'api.tomtom.com',
   'app.ticketmaster.com',
   'query1.finance.yahoo.com',
@@ -99,6 +111,25 @@ export function parseWatchlist(raw) {
 /** Airports that matter for a north-Jersey base. */
 export const HOME_AIRPORTS = Object.freeze(['EWR', 'LGA', 'JFK', 'TEB']);
 
+/** FAA airport reference points ([lat, lon]) for drawing the home airports on the map. */
+export const AIRPORT_POINTS = Object.freeze({
+  EWR: [40.6925, -74.1687],
+  LGA: [40.7769, -73.874],
+  JFK: [40.6398, -73.7789],
+  TEB: [40.8501, -74.0608],
+});
+
+/**
+ * Radar window around home: ±1.5° lon × ±0.9° lat (~250 × 200 km), centred on
+ * the coarsened point so the image request never carries the exact home.
+ */
+export function radarBbox(home) {
+  const lat = coarse(home.lat, 1);
+  const lon = coarse(home.lon, 1);
+  return { west: round2(lon - 1.5), south: round2(lat - 0.9), east: round2(lon + 1.5), north: round2(lat + 0.9) };
+}
+const round2 = (v) => Math.round(v * 100) / 100;
+
 /**
  * Google News RSS searches. `when:` bounds recency server-side. Local and
  * incident searches are built from the home's place names (see
@@ -135,6 +166,64 @@ export function localNewsQueries(places, state) {
     local: `(${quoted})${st} when:2d`,
     safety: `(${quoted})${st} (police OR shooting OR fire OR crash OR closed OR evacuation OR outage OR "water main" OR arrested) when:2d`,
   };
+}
+
+/** NDBC buoy for sea state: 44065 is the New York Harbor entrance. Override with JARVIS_BUOY. */
+export const DEFAULT_BUOY = '44065';
+
+/** States whose FAA flight restrictions matter for a north-Jersey base. */
+export const TFR_STATES = Object.freeze(['NJ', 'NY']);
+
+/**
+ * Reports, not verified events: drone and UAP sightings, payment-system
+ * attacks or outages, and local power-outage reports.
+ */
+export const REPORT_QUERIES = Object.freeze({
+  uap: '("drone sighting" OR "drone sightings" OR drones OR UAP OR UFO OR "unidentified aircraft") ("New Jersey" OR NJ) when:7d',
+  finsec: '("bank outage" OR "payment outage" OR "card network" OR "banking app down" OR ransomware OR "cyberattack") (bank OR banks OR payments OR Visa OR Mastercard OR "credit union") when:1d',
+});
+
+/** A report headline must say what it is about in its own title. */
+export const REPORT_TITLE_FILTERS = Object.freeze({
+  uap: [/\b(drones?|UAPs?|UFOs?|unidentified (?:aerial|aircraft|object))\b/i, /\b(New Jersey|N\.\s?J\.?|NJ)\b/],
+  finsec: [
+    /\b(banks?|banking|payments?|card|Visa|Mastercard|credit union|ATMs?|Zelle|Venmo|PayPal|Fedwire|ACH|SWIFT|brokerage|Robinhood|Schwab|Fidelity|Chase|Wells Fargo|Citi|Bank of America)\b/i,
+    /\b(outage|down|hack(?:ed)?|breach|cyberattack|ransomware|attack|disrupt\w*|glitch)\b/i,
+  ],
+  power: [/\b(power|outages?|PSE&G|PSEG|JCP&L|electric\w*|blackout)\b/i],
+});
+
+/** Power-outage report query built from the home places. */
+export function powerQuery(places, state) {
+  const quoted = places.map((p) => `"${p.replace(/"/g, '')}"`).join(' OR ');
+  return `(${quoted})${state ? ` ${state}` : ''} ("power outage" OR "without power" OR outages OR PSE&G OR PSEG OR "JCP&L") when:1d`;
+}
+
+/** Bbox of ~±0.35° lat / ±0.45° lon (~40 km) around the coarsened home. */
+export function regionBbox(home) {
+  const lat = coarse(home.lat, 2);
+  const lon = coarse(home.lon, 2);
+  return { west: round2(lon - 0.45), south: round2(lat - 0.35), east: round2(lon + 0.45), north: round2(lat + 0.35) };
+}
+
+/** Bbox of ~±0.06° (~6 km) around the coarsened home, for the flood-zone map. */
+export function nearBbox(home) {
+  const lat = coarse(home.lat, 2);
+  const lon = coarse(home.lon, 2);
+  return { west: round2(lon - 0.08), south: round2(lat - 0.06), east: round2(lon + 0.08), north: round2(lat + 0.06) };
+}
+
+/** Overpass QL for public safe places within `radiusM` of the coarsened home. */
+export function safePlacesQuery(home, radiusM = 8000) {
+  const a = `around:${Math.round(radiusM)},${coarse(home.lat, 3)},${coarse(home.lon, 3)}`;
+  return `[out:json][timeout:25];(
+nwr[amenity=hospital][emergency!=no](${a});
+nwr[amenity=police](${a});
+nwr[amenity=fire_station](${a});
+nwr[emergency=assembly_point](${a});
+nwr[amenity=shelter][shelter_type=emergency](${a});
+nwr[social_facility=shelter](${a});
+);out center tags 300;`;
 }
 
 /** GDELT tone themes — one request each, spaced ≥5 s apart per GDELT policy. */
@@ -231,6 +320,35 @@ export const urls = {
     query: `${query} sourcelang:english`, mode: 'timelinetone', timespan: '7d', format: 'json',
   })}`,
   cisaKev: () => 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
+  nwpsGauges: (bbox) => `https://api.water.noaa.gov/nwps/v1/gauges?${new URLSearchParams({
+    'bbox.xmin': String(bbox.west), 'bbox.ymin': String(bbox.south), 'bbox.xmax': String(bbox.east), 'bbox.ymax': String(bbox.north), srid: 'EPSG_4326',
+  })}`,
+  ndbcBuoy: (id) => `https://www.ndbc.noaa.gov/data/realtime2/${encodeURIComponent(String(id).replace(/[^A-Za-z0-9]/g, ''))}.txt`,
+  nfhlExport: (bbox) => `https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/export?${new URLSearchParams({
+    bbox: [bbox.west, bbox.south, bbox.east, bbox.north].join(','), bboxSR: '4326', imageSR: '4326',
+    size: '1024,768', layers: 'show:28', format: 'png32', transparent: 'true', f: 'image',
+  })}`,
+  femaShelters: (bbox) => `https://gis.fema.gov/arcgis/rest/services/NSS/OpenShelters/MapServer/0/query?${new URLSearchParams({
+    where: "shelter_status='OPEN'", geometry: [bbox.west, bbox.south, bbox.east, bbox.north].join(','), geometryType: 'esriGeometryEnvelope',
+    inSR: '4326', spatialRel: 'esriSpatialRelIntersects', outFields: 'shelter_name,address,city,state,shelter_status,evacuation_capacity,total_population,org_name,pet_accommodations_code,wheelchair_accessible,latitude,longitude',
+    returnGeometry: 'false', f: 'json',
+  })}`,
+  tfrList: () => 'https://tfr.faa.gov/tfrapi/exportTfrList',
+  overpass: () => 'https://overpass-api.de/api/interpreter',
+  overpassMirrors: () => ['https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'],
+  nominatimSearch: (q, bbox) => `https://nominatim.openstreetmap.org/search?${new URLSearchParams({
+    q, format: 'jsonv2', limit: '15', bounded: '1', extratags: '1', viewbox: [bbox.west, bbox.north, bbox.east, bbox.south].join(','),
+  })}`,
+  osrmRoute: (from, to) => `https://routing.openstreetmap.de/routed-car/route/v1/driving/${from.lon.toFixed(5)},${from.lat.toFixed(5)};${to.lon.toFixed(5)},${to.lat.toFixed(5)}?overview=full&geometries=geojson&alternatives=false&steps=false`,
+  elevation: (points) => `https://api.open-meteo.com/v1/elevation?${new URLSearchParams({
+    latitude: points.map((p) => p.lat.toFixed(4)).join(','), longitude: points.map((p) => p.lon.toFixed(4)).join(','),
+  })}`,
+  radarMeta: () => 'https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer?f=json',
+  radarExport: (bbox, timeMs) => `https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity_time/ImageServer/exportImage?${new URLSearchParams({
+    bbox: [bbox.west, bbox.south, bbox.east, bbox.north].join(','),
+    bboxSR: '4326', imageSR: '4326', size: '1200,720', format: 'png32', transparent: 'true',
+    time: String(timeMs), f: 'image',
+  })}`,
   redditToken: () => 'https://www.reddit.com/api/v1/access_token',
   redditHot: (sub) => `https://oauth.reddit.com/r/${encodeURIComponent(sub)}/hot?limit=10&raw_json=1`,
   bskySession: () => 'https://bsky.social/xrpc/com.atproto.server.createSession',
